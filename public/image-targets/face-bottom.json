@@ -1,0 +1,23 @@
+{
+  "imagePath": "image-targets/face-bottom_luminance.png",
+  "metadata": null,
+  "name": "face-bottom",
+  "type": "PLANAR",
+  "properties": {
+    "left": 0,
+    "top": 0,
+    "width": 960,
+    "height": 1280,
+    "isRotated": false,
+    "originalWidth": 960,
+    "originalHeight": 1280
+  },
+  "resources": {
+    "originalImage": "face-bottom_original.png",
+    "croppedImage": "face-bottom_cropped.png",
+    "thumbnailImage": "face-bottom_thumbnail.png",
+    "luminanceImage": "face-bottom_luminance.png"
+  },
+  "created": 1794119540778,
+  "updated": 1794119540778
+}

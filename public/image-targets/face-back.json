@@ -1,0 +1,23 @@
+{
+  "imagePath": "image-targets/face-back_luminance.png",
+  "metadata": null,
+  "name": "face-back",
+  "type": "PLANAR",
+  "properties": {
+    "left": 0,
+    "top": 0,
+    "width": 960,
+    "height": 1280,
+    "isRotated": false,
+    "originalWidth": 960,
+    "originalHeight": 1280
+  },
+  "resources": {
+    "originalImage": "face-back_original.png",
+    "croppedImage": "face-back_cropped.png",
+    "thumbnailImage": "face-back_thumbnail.png",
+    "luminanceImage": "face-back_luminance.png"
+  },
+  "created": 1794119540593,
+  "updated": 1794119540593
+}

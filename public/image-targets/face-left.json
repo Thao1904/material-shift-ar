@@ -1,0 +1,23 @@
+{
+  "imagePath": "image-targets/face-left_luminance.png",
+  "metadata": null,
+  "name": "face-left",
+  "type": "PLANAR",
+  "properties": {
+    "left": 0,
+    "top": 0,
+    "width": 960,
+    "height": 1280,
+    "isRotated": false,
+    "originalWidth": 960,
+    "originalHeight": 1280
+  },
+  "resources": {
+    "originalImage": "face-left_original.png",
+    "croppedImage": "face-left_cropped.png",
+    "thumbnailImage": "face-left_thumbnail.png",
+    "luminanceImage": "face-left_luminance.png"
+  },
+  "created": 1794119540653,
+  "updated": 1794119540653
+}

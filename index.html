@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Material Shift</title>
+    <meta name="description" content="Hold a printed cube in front of your phone and watch it turn into wood, marble, metal or white plaster.">
+
+    <!-- 8th Wall engine + XRExtras + Landing Page (same as the three.js example) -->
+    <script src="https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1/dist/xr.js" async crossorigin="anonymous" data-preload-chunks="slam"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@8thwall/xrextras@1/dist/xrextras.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@8thwall/landing-page@1/dist/landing-page.js" crossorigin="anonymous"></script>
+
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@500;600;700&display=swap">
+    <link rel="stylesheet" href="src/index.css">
+  </head>
+  <body>
+    <canvas id="camerafeed"></canvas>
+
+    <div id="hud" hidden>
+      <div class="top">
+        <span class="pill" id="status"><i></i><span>Point the camera at any face of the block</span></span>
+        <div class="topbtns">
+          <button class="pill btn" id="tipBtn" type="button" aria-pressed="false">Tip to shift</button>
+          <button class="pill btn" id="debugBtn" type="button" aria-pressed="false">Debug</button>
+        </div>
+      </div>
+      <div class="matname" id="matname"></div>
+      <div class="compare" id="compare">Real block</div>
+      <div class="bottom">
+        <p class="help ar-only">Hold the screen to see the real block</p>
+        <p class="help preview-only">Drag to orbit · ↑ ↓ ← → tip the cube</p>
+        <div class="chips" id="chips"></div>
+      </div>
+    </div>
+
+    <script type="module" src="src/app.js"></script>
+  </body>
+</html>

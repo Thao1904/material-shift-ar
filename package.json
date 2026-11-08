@@ -1,0 +1,20 @@
+{
+  "name": "material-shift-ar",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "serve": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview",
+    "markers": "python3 tools/make-markers.py",
+    "targets": "node tools/make-targets.mjs"
+  },
+  "dependencies": {
+    "three": "^0.183.2"
+  },
+  "devDependencies": {
+    "@8thwall/image-target-cli": "^1.0.0",
+    "sharp": "^0.34.5",
+    "vite": "^8.0.8"
+  }
+}

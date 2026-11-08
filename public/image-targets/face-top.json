@@ -1,0 +1,23 @@
+{
+  "imagePath": "image-targets/face-top_luminance.png",
+  "metadata": null,
+  "name": "face-top",
+  "type": "PLANAR",
+  "properties": {
+    "left": 0,
+    "top": 0,
+    "width": 960,
+    "height": 1280,
+    "isRotated": false,
+    "originalWidth": 960,
+    "originalHeight": 1280
+  },
+  "resources": {
+    "originalImage": "face-top_original.png",
+    "croppedImage": "face-top_cropped.png",
+    "thumbnailImage": "face-top_thumbnail.png",
+    "luminanceImage": "face-top_luminance.png"
+  },
+  "created": 1794119540719,
+  "updated": 1794119540719
+}
