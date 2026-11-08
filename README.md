@@ -9,6 +9,13 @@ Khối giấy (6 marker in sẵn) → 8th Wall Image Target → three.js (vật 
                                                           Wood · Marble · Metal · White
 ```
 
+Project có **hai chế độ**:
+
+| Trang | Vật thể | Cách nhận diện |
+|---|---|---|
+| `index.html` | Khối giấy in 6 marker (mục 1 bên dưới) | 8th Wall Image Targets |
+| `block.html` | **Khối gỗ trắng có 4 chấm đỏ ở góc mỗi mặt** | Bộ nhận diện chấm đỏ tự viết (mục 8) |
+
 ---
 
 ## 0. Cần chuẩn bị
@@ -175,6 +182,40 @@ Khi nhìn thấy nhiều mặt cùng lúc, code chọn mặt đang **nhìn thẳ
 | Khối ảo to hoặc nhỏ hơn khối thật | Marker in sai tỉ lệ: in lại ở 100%, hoặc kiểm tra marker có cao bằng cạnh khối không |
 | Bàn tay bị vật liệu che | Đây là giới hạn của bản thử: AR chưa biết bàn tay nằm trước khối. Cầm khối ở các cạnh dưới |
 | Trên máy tính chỉ thấy mã QR | Đúng như thiết kế. Dùng `?preview` để xem trên máy tính |
+
+---
+
+## 8. Chế độ khối gỗ chấm đỏ (`block.html`)
+
+Dùng chính khối gỗ sơn trắng của bạn, không cần in marker. Mở `https://<tên-bạn>.github.io/material-shift-ar/block.html` trên điện thoại rồi bấm **Start camera**.
+
+**Vì sao không dùng 8th Wall Image Target cho khối này?** Image Target cần một hình in có nhiều chi tiết. Một mặt trắng trơn với 4 chấm nhỏ không đủ điểm để 8th Wall nhận ra, nên trang này dùng bộ nhận diện riêng, chạy trên trình duyệt (`src/block/dots-core.js`).
+
+**Cách nhận diện**, lặp lại mỗi khung hình:
+
+1. Tìm các đốm đỏ nhỏ và tròn. Màu cam, màu da và các vệt sọc dài bị loại.
+2. Thử các bộ 4 đốm tạo thành một tứ giác lồi mà **bên trong là màu trắng** (mặt gỗ). Bước này loại đồ màu đỏ ở xung quanh, ví dụ quả bóng đỏ hay vải sọc hồng.
+3. So bộ 4 đốm với hai kiểu mặt: **mặt lớn** (hình vuông) và **mặt cạnh** (hình chữ nhật dài). Dùng homography để tính góc nghiêng, rồi giữ kiểu mặt cho ra phép xoay hợp lý nhất.
+4. Vì mặt khối đối xứng, có nhiều đáp án hợp lệ. Code chọn đáp án gần với khung hình trước nhất để khối không bị giật.
+5. Suy ra tâm khối: lùi vào trong một nửa độ dày (nếu thấy mặt lớn) hoặc một nửa chiều sâu (nếu thấy mặt cạnh).
+
+Hai ảnh thật của khối nằm trong `tools/test/photos/`. Chạy `node tools/test/dots.test.mjs` để kiểm tra: ảnh mặt trên phải ra `top`, ảnh mặt bên phải ra `side`.
+
+**Đo khối và nhập vào app.** Kích thước mặc định được ước lượng từ ảnh (10 × 10 × 3 cm). Bấm **Calibrate** để nhập số đo bằng thước kẻ. Số đo được lưu trên điện thoại đó. Muốn đổi mặc định cho mọi người, sửa `src/block/config.js`.
+
+| Ô | Đo gì |
+|---|---|
+| Width / Depth / Thickness | 3 cạnh của khối |
+| Big face: dot to edge | từ tâm chấm đỏ đến mép gần nhất, trên mặt lớn |
+| Side face: dot to short / long edge | trên mặt cạnh: từ tâm chấm đến mép ngắn (đứng) và mép dài (ngang) |
+| Camera FOV | góc nhìn camera. Nếu vật liệu trông **to hơn** khối thật thì tăng, **nhỏ hơn** thì giảm |
+
+**Để nhận diện tốt hơn:**
+
+- Tô các chấm **đậm hơn và to hơn**, đường kính 6–8 mm, bằng bút dạ đỏ. Các chấm hồng nhạt trên mặt cạnh là chỗ dễ trượt nhất.
+- Đừng để ngón tay che chấm. Cầm khối ở giữa các cạnh.
+- Cầm cách điện thoại 20–40 cm, nơi đủ sáng, tránh nền đỏ hoặc hồng ngay sau khối.
+- Bật **Debug** để xem: vòng xanh dương là các đốm đỏ tìm được, khung xanh lá là mặt đang dùng, kèm sai số và khoảng cách.
 
 ---
 

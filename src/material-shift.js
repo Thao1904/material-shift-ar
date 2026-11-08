@@ -15,7 +15,41 @@ const SMOOTHING = 18          // higher = snappier, lower = smoother
 const easeInOut = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 const easeOut = t => 1 - Math.pow(1 - t, 3)
 
-export function createMaterialShift({scene, camera, renderer, canvas, holdToCompare = true}) {
+// Box geometry with UVs projected by face, so textures keep their real proportions on thin sides.
+function makeBoxGeometry(box) {
+  const r = Math.min(box.w, box.h, box.d) * 0.035
+  const g = new RoundedBoxGeometry(box.w * COVER, box.h * COVER, box.d * COVER, 4, r)
+  const pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv
+  const k = 1 / Math.max(box.w, box.h, box.d)
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i)
+    const ax = Math.abs(nor.getX(i)), ay = Math.abs(nor.getY(i)), az = Math.abs(nor.getZ(i))
+    if (ax >= ay && ax >= az) uv.setXY(i, z * k + 0.5, y * k + 0.5)
+    else if (ay >= az) uv.setXY(i, x * k + 0.5, z * k + 0.5)
+    else uv.setXY(i, x * k + 0.5, y * k + 0.5)
+  }
+  uv.needsUpdate = true
+  return g
+}
+
+// Thin glowing rectangle that rides the sweep line, lying across `axis`.
+function makeSweepFrame(box, axis, mat) {
+  const g = new THREE.Group()
+  const dims = {x: box.w, y: box.h, z: box.d}
+  const [a, b] = {x: ['y', 'z'], y: ['x', 'z'], z: ['x', 'y']}[axis]
+  const A = dims[a] * 1.07, B = dims[b] * 1.07, th = Math.min(A, B) * 0.035
+  const bar = (len, along, offAxis, off) => {
+    const s = {x: th, y: th * 0.3, z: th}
+    s[axis] = th * 0.3; s[along] = len; s[offAxis] = th
+    const m = new THREE.Mesh(new THREE.BoxGeometry(s.x, s.y, s.z), mat)
+    m.position[offAxis] = off
+    g.add(m)
+  }
+  bar(A, a, b, B / 2); bar(A, a, b, -B / 2); bar(B, b, a, A / 2); bar(B, b, a, -A / 2)
+  return g
+}
+
+export function createMaterialShift({scene, camera, renderer, canvas, holdToCompare = true, box = {w: 1, h: 1, d: 1}, sweepAxis = 'y'}) {
   const $ = id => document.getElementById(id)
 
   // ---------- rendering setup ----------
@@ -42,18 +76,17 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   const root = new THREE.Group()
   root.visible = false
   scene.add(root)
-  const geo = new RoundedBoxGeometry(COVER, COVER, COVER, 4, 0.035)
+  let geo = makeBoxGeometry(box)
   const meshA = new THREE.Mesh(geo, mats[0].plain)
   const meshB = new THREE.Mesh(geo, mats[0].clipIn)
   meshB.visible = false
   meshA.castShadow = meshB.castShadow = true
   root.add(meshA, meshB)
 
-  const ringGeo = new THREE.RingGeometry(0.535 * Math.SQRT2, 0.575 * Math.SQRT2, 4, 1)
-  ringGeo.rotateZ(Math.PI / 4); ringGeo.rotateX(-Math.PI / 2)
+  const axisVec = new THREE.Vector3(sweepAxis === 'x' ? 1 : 0, sweepAxis === 'y' ? 1 : 0, sweepAxis === 'z' ? 1 : 0)
   const ringMat = new THREE.MeshBasicMaterial({color: 0xfff0c2, transparent: true, opacity: 0, side: THREE.DoubleSide,
     depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false})
-  const ring = new THREE.Mesh(ringGeo, ringMat)
+  let ring = makeSweepFrame(box, sweepAxis, ringMat)
   ring.renderOrder = 3
   root.add(ring)
 
@@ -73,7 +106,21 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   })
   const wire = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({color: 0xffd166, depthTest: false}))
   wire.visible = false
+  wire.scale.set(box.w, box.h, box.d)
   root.add(wire)
+
+  /** Change the box size (e.g. after calibration). */
+  function setBox(b) {
+    box = b
+    const old = geo
+    geo = makeBoxGeometry(box)
+    meshA.geometry = geo; meshB.geometry = geo
+    old.dispose()
+    root.remove(ring)
+    ring = makeSweepFrame(box, sweepAxis, ringMat); ring.renderOrder = 3
+    root.add(ring)
+    wire.scale.set(box.w, box.h, box.d)
+  }
 
   // ---------- state ----------
   let current = 0, sweep = null
@@ -163,12 +210,13 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   function updateSweep(now) {
     if (!sweep) return
     const k = Math.min(1, (now - sweep.t0) / SWEEP_MS), e = easeInOut(k)
-    const h = -0.56 + 1.12 * e
-    _up.set(0, 1, 0).applyQuaternion(root.quaternion)
+    const L = {x: box.w, y: box.h, z: box.d}[sweepAxis]
+    const h = (-0.56 + 1.12 * e) * L
+    _up.copy(axisVec).applyQuaternion(root.quaternion)
     _p.copy(_up).multiplyScalar(h * root.scale.x).add(root.position)
-    planeIn.setFromNormalAndCoplanarPoint(_c.copy(_up).negate(), _p)   // new material below the line
-    planeOut.setFromNormalAndCoplanarPoint(_up, _p)                    // old material above it
-    ring.position.y = h
+    planeIn.setFromNormalAndCoplanarPoint(_c.copy(_up).negate(), _p)   // new material on the start side
+    planeOut.setFromNormalAndCoplanarPoint(_up, _p)                    // old material on the far side
+    ring.position.set(0, 0, 0); ring.position[sweepAxis] = h
     ringMat.opacity = Math.sin(Math.PI * k) * 0.9
     if (k >= 1) finishSweep()
   }
@@ -235,6 +283,19 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
     }
   }
 
+  /** Own trackers (red-dot block): found or not, pose in world units, with the same lost-grace rule. */
+  function updateDirect(found, pos, quat, label, now) {
+    if (found) {
+      cand.pos.copy(pos); cand.quat.copy(quat); pose.scale = 1
+      if (!tracking) { popT = 0; buzz(10) }
+      tracking = true; lastSeen = now
+      setStatus(`Tracking · ${label}`, true)
+    } else if (tracking && now - lastSeen > LOST_GRACE_MS) {
+      tracking = false
+      setStatus('Show the block: all 4 red dots of one face')
+    }
+  }
+
   /** Preview: drive the cube directly. */
   function setPose(pos, quat, scale) {
     cand.pos.copy(pos); cand.quat.copy(quat); pose.scale = scale
@@ -260,5 +321,5 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
 
   buildUI()
   setStatus('Point the camera at any face of the block')
-  return {updateTargets, setPose, tick, setMaterial, root, get current() { return current }}
+  return {updateTargets, updateDirect, setPose, setBox, setStatus, tick, setMaterial, root, get current() { return current }}
 }
