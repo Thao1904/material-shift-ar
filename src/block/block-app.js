@@ -6,7 +6,7 @@ import {trackFrame, makeModels, intrinsics} from './dots-core.js'
 import {DEFAULT_BLOCK} from './config.js'
 
 const $ = id => document.getElementById(id)
-const STORE = 'material-shift-block-v1'
+const STORE = 'material-shift-block-v2'
 let PROC_LONG = 720            // processing resolution (longer side, px); drops to 560 on slow phones
 
 // ---------- block measurements (saved on this phone) ----------

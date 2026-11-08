@@ -201,7 +201,7 @@ Dùng chính khối gỗ sơn trắng của bạn, không cần in marker. Mở 
 
 Hai ảnh thật của khối nằm trong `tools/test/photos/`. Chạy `node tools/test/dots.test.mjs` để kiểm tra: ảnh mặt trên phải ra `top`, ảnh mặt bên phải ra `side`.
 
-**Đo khối và nhập vào app.** Kích thước mặc định được ước lượng từ ảnh (10 × 10 × 3 cm). Bấm **Calibrate** để nhập số đo bằng thước kẻ. Số đo được lưu trên điện thoại đó. Muốn đổi mặc định cho mọi người, sửa `src/block/config.js`.
+**Đo khối và nhập vào app.** Kích thước mặc định là 8 × 8 × 2 cm. Bấm **Calibrate** để nhập số đo bằng thước kẻ. Số đo được lưu trên điện thoại đó. Muốn đổi mặc định cho mọi người, sửa `src/block/config.js`.
 
 | Ô | Đo gì |
 |---|---|
