@@ -32,11 +32,13 @@ export function findRedBlobs(rgba, w, h) {
   const maxArea = w * h * 0.004
   for (let start = 0; start < w * h; start++) {
     if (mask[start] !== 1) continue
-    let sp = 0, area = 0, sx = 0, sy = 0, x0 = w, y0 = h, x1 = 0, y1 = 0
+    let sp = 0, area = 0, sx = 0, sy = 0, x0 = w, y0 = h, x1 = 0, y1 = 0, peak = 0
     stack[sp++] = start; mask[start] = 2
     while (sp) {
       const i = stack[--sp], x = i % w, y = (i / w) | 0
       area++; sx += x; sy += y
+      const pp = i * 4, red = rgba[pp] - Math.max(rgba[pp + 1], rgba[pp + 2])
+      if (red > peak) peak = red
       if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         const nx = x + dx, ny = y + dy
@@ -49,6 +51,7 @@ export function findRedBlobs(rgba, w, h) {
     if (area < 3 || area > maxArea) continue
     if (Math.max(bw, bh) / Math.min(bw, bh) > 2.8) continue      // lines, stripes
     if (area / (bw * bh) < 0.2) continue                           // very ragged shapes (pen dots can be hollow scribbles)
+    if (peak < 55) continue                                         // skin and warm shadows never get this red (measured: skin <= 49, pen dots >= 66)
     blobs.push({x: sx / area + 0.5, y: sy / area + 0.5, area, w: bw, h: bh})
   }
   return blobs
@@ -86,7 +89,7 @@ function convexAndSane(q) {
     sign = s
     const v1x = a.x - b.x, v1y = a.y - b.y, v2x = c.x - b.x, v2y = c.y - b.y
     const cos = (v1x * v2x + v1y * v2y) / Math.hypot(v1x, v1y) / Math.hypot(v2x, v2y)
-    if (cos > 0.85 || cos < -0.85) return false          // angle outside ~32°..148°
+    if (cos > 0.95 || cos < -0.95) return false          // angle outside ~18°..162° (strong tilts are fine)
   }
   return true
 }
@@ -101,7 +104,7 @@ function whiteness(q, rgba, w, h, bright) {
     const bx = q[3].x + (q[2].x - q[3].x) * s, by = q[3].y + (q[2].y - q[3].y) * s
     const {l, s: sat} = luma(rgba, w, h, ax + (bx - ax) * t, ay + (by - ay) * t)
     n++
-    if (l > bright * 0.62 && sat < 0.2) ok++
+    if (l > bright * 0.42 && sat < 0.2) ok++                      // white paint, also when the face is tilted into shadow
   }
   return ok / n
 }
@@ -129,9 +132,9 @@ export function candidateQuads(blobs, rgba, w, h, maxBlobs = 16) {
       const area = quadArea(q)
       if (area < minArea) continue
       const sizes = q.map(p => p.area), smax = Math.max(...sizes), smin = Math.min(...sizes)
-      if (smax > smin * 9) continue                    // dots of one face look alike
+      if (smax > smin * 14) continue                   // dots of one face look alike (allowing for perspective)
       const white = whiteness(q, rgba, w, h, bright)
-      if (white < 0.7) continue
+      if (white < 0.65) continue
       out.push({q, white, area})
     }
   return out.sort((x, y) => y.area - x.area)
@@ -334,6 +337,39 @@ export function resolveByMark(best, rgba, w, h, K, cfg) {
   return top >= 0.3 ? {sol: {...best, ...pick, alts: best.alts}, score: top} : {sol: best, score: 0}
 }
 
+/** All 24 dots of the block in block coordinates, with their face normal. */
+export function allDots(cfg) {
+  const {W, D, T, topInset, sideInsetX, sideInsetY} = cfg
+  const a = W / 2 - topInset, b = D / 2 - topInset, sx = W / 2 - sideInsetX, sz = D / 2 - sideInsetX, sy = T / 2 - sideInsetY
+  const out = []
+  for (const y of [1, -1]) for (const i of [-1, 1]) for (const j of [-1, 1]) out.push({p: [i * a, y * T / 2, j * b], n: [0, y, 0]})
+  for (const z of [1, -1]) for (const i of [-1, 1]) for (const j of [-1, 1]) out.push({p: [i * sx, j * sy, z * D / 2], n: [0, 0, z]})
+  for (const x of [1, -1]) for (const i of [-1, 1]) for (const j of [-1, 1]) out.push({p: [x * W / 2, j * sy, i * sz], n: [x, 0, 0]})
+  return out
+}
+
+/**
+ * How well a pose explains the OTHER red blobs: dots of the faces that point at the camera
+ * should show up where the pose predicts them. Returns {pred, hit}.
+ */
+export function support(sol, blobs, quad, K, cfg) {
+  let pred = 0, hit = 0
+  const used = new Set(quad)
+  for (const d of allDots(cfg)) {
+    const n = qrot(sol.quat, d.n), v = qrot(sol.quat, d.p)
+    const c = [v[0] + sol.center[0], v[1] + sol.center[1], v[2] + sol.center[2]]
+    const L = Math.hypot(...c)
+    if (-(n[0] * c[0] + n[1] * c[1] + n[2] * c[2]) / L < 0.45) continue     // only faces clearly turned toward the camera
+    const px = [K.fx * c[0] / c[2] + K.cx, K.fy * c[1] / c[2] + K.cy]
+    if (quad.some(q => Math.hypot(q.x - px[0], q.y - px[1]) < 3)) continue  // one of the 4 dots we fitted
+    const e = projectBlockPoint(sol, K, [d.p[0] + 0.6, d.p[1], d.p[2]])
+    const r = Math.max(6, e ? Math.hypot(e[0] - px[0], e[1] - px[1]) : 6)
+    pred++
+    if (blobs.some(bl => !used.has(bl) && Math.hypot(bl.x - px[0], bl.y - px[1]) < r)) hit++
+  }
+  return {pred, hit}
+}
+
 /**
  * Full frame: blobs -> quads -> pose.
  * @returns {found, blobs, quad, model, center, quat, err}
@@ -343,11 +379,17 @@ export function trackFrame(rgba, w, h, K, models, prevQuat, maxErr = 0.15, cfg =
   if (blobs.length < 4) return {found: false, blobs}
   const quads = candidateQuads(blobs, rgba, w, h)
   let best = null
-  for (const c of quads.slice(0, 40)) {
+  for (const c of quads.slice(0, 400)) {
     const s = solveQuad(c.q, K, models, prevQuat)
     if (!s || s.err > maxErr) continue
-    // prefer large, white, well-fitting quads
-    const score = Math.log(c.area) * 0.25 + c.white - s.err * 3
+    // prefer large, white, well-fitting quads whose pose also explains the other visible dots
+    // big faces give the most accurate pose, so area weighs in; support is a ratio, not a count
+    let score = Math.log(c.area) * 0.45 + c.white - s.err * 3
+    if (cfg) {
+      const sp = support(s, blobs, c.q, K, cfg)
+      if (sp.pred >= 4 && sp.hit / sp.pred < 0.34) continue         // the pose predicts dots that are not there
+      if (sp.pred) score += 0.6 * sp.hit / sp.pred
+    }
     if (!best || score > best.score) best = {...s, quad: c.q, score}
   }
   if (!best) return {found: false, blobs}

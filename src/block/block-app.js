@@ -104,7 +104,7 @@ function refreshDisplay(byMe) {
   }
 }
 // alignment: the block frame is only trusted after the black origin mark has been seen
-let aligned = false, lastFound = -1e9
+let aligned = false, lastFound = -1e9, accepted = null, jumpCount = 0
 
 // ---------- processing canvas ----------
 const proc = document.createElement('canvas')
@@ -150,6 +150,16 @@ function loop() {
     if (cost > 30 && PROC_LONG > 560) { PROC_LONG = 560; layout() }
     else if (cost < 12 && PROC_LONG < 720) { PROC_LONG = 720; layout() }
     last = r
+    // stability: a pose that jumps far from the last accepted one must repeat for 3 frames first
+    if (r.found && accepted && now - lastFound < 500) {
+      const dq = Math.abs(r.quat[0] * accepted.quat[0] + r.quat[1] * accepted.quat[1] + r.quat[2] * accepted.quat[2] + r.quat[3] * accepted.quat[3])
+      const dp = Math.hypot(r.center[0] - accepted.center[0], r.center[1] - accepted.center[1], r.center[2] - accepted.center[2])
+      if (dq < Math.cos(35 * Math.PI / 360) || dp > 4) {
+        jumpCount = (jumpCount || 0) + 1
+        if (jumpCount < 3) r.found = false
+      } else jumpCount = 0
+    }
+    if (r.found) accepted = {quat: r.quat, center: r.center}
     if (r.found) {
       if (now - lastFound > 1500) aligned = false          // lost for a while: orientation must be re-confirmed
       if (r.markScore > 0.3) aligned = true
