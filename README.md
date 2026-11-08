@@ -16,6 +16,7 @@ Project có **hai chế độ**:
 | `index.html` | Khối giấy in 6 marker (mục 1 bên dưới) | 8th Wall Image Targets |
 | `block.html` | **Khối gỗ trắng có 4 chấm đỏ ở góc mỗi mặt** | Bộ nhận diện chấm đỏ tự viết (mục 8), hai người cùng xem (mục 9) |
 | `pen.html` | **Bút bất kỳ có 2 sticker neon**, nhiều bút cùng lúc | Bộ nhận diện sticker tự viết (mục 10) |
+| `stool.html` | **Ghế đôn SONGMICS** với 8 sticker trên mặt nệm | Đổi màu và loại vải (mục 11) |
 
 ---
 
@@ -331,11 +332,46 @@ Nếu bạn đã tự đo FOV camera ở trang khối gỗ, trang bút dùng l�
 
 ---
 
+## 11. Đổi màu vải ghế đôn (`stool.html`)
+
+Mở `https://<tên-bạn>.github.io/material-shift-ar/stool.html`.
+
+**Mẫu ghế:** ghế đôn SONGMICS loại nhỏ có chân, dòng ULSF012, kích thước **40 × 32 × 33,5 cm**, mặt nệm chần 3×3. Mô hình 3D gồm các phần sau, theo đúng kích thước này:
+- mặt nệm chần 9 ô phồng,
+- nắp dày 6,5 cm, chờm ra ngoài thân 0,8 cm,
+- thân hộp,
+- 4 chân nhựa đen.
+
+Dưới chân ghế có bóng đổ xuống sàn để ghế ảo trông như đặt thật trên sàn.
+
+**Sticker:** dùng 8 sticker xanh chuối trên mặt nệm, gồm 4 góc và 4 điểm giữa cạnh, mỗi sticker cách mép khoảng 1,2 cm. Con số 1,2 cm được fit từ ảnh thật, và ở số này kích thước tính ra cũng khớp đúng 40 × 32 cm.
+
+**Thao tác:**
+- **Vuốt ngang:** đổi màu vải, có đường chia chạy theo ngón tay.
+- **Các nút màu:** Charcoal, Stone, Oatmeal, Navy, Emerald, Terracotta, Mustard, Blush.
+- **Linen / Velvet / Leather:** đổi loại vải, với vệt chia tự quét ngang qua ghế.
+- **Giữ ngón tay:** xem ghế thật.
+
+**Cách nhận diện** (`src/stool/stool-core.js`):
+1. Tìm các sticker xanh.
+2. Thử từng bộ 4 sticker xem có phải 4 góc của mặt nệm 37,6 × 29,6 cm không. Bộ 4 điểm giữa cạnh tạo thành hình thoi nên tự bị loại.
+3. Giữ bộ mà vị trí tính ra cũng khớp với các sticker giữa cạnh.
+4. Tinh chỉnh vị trí ghế bằng cả 8 sticker.
+
+Vì mặt ghế đối xứng khi xoay 180°, app luôn chọn hướng gần với khung hình trước để ghế không bị xoay lộn.
+
+Trong lúc bạn di chuyển quanh ghế, app tự đo FOV camera từ hình chữ nhật của các sticker. Nếu ghế của bạn khác kích thước, vào **Calibrate** để sửa.
+
+**Test:** `node tools/test/stool.test.mjs`: tìm được ghế với 8/8 sticker, sai số chiếu khoảng 4 px. Ảnh không có sticker thì báo không tìm thấy.
+
+---
+
 ## Tài liệu tham khảo
 
 - [8th Wall: Image Targets guide](https://8thwall.org/docs/engine/guides/image-targets)
 - [8th Wall: Self-hosted engine](https://8thwall.org/docs/migration/self-hosted)
 - [@8thwall/image-target-cli](https://www.npmjs.com/package/@8thwall/image-target-cli)
 - [8thwall/threejs-world-effects-example](https://github.com/8thwall/threejs-world-effects-example)
+- [SONGMICS ULSF012W01: Small Ottoman with Legs, 12.6 x 15.8 x 13.2 in](https://woodartsupply.com/products/songmics-storage-ottoman-small-ottoman-foot-rest-with-legs-12-6-x-15-8-x-13-2-inches-foot-stool-ottoman-with-storage-load-up-to-660-lb-for-living-room-bedroom-dorm-cream-white-ulsf012w01)
 
 8th Wall Engine Binary dùng theo giấy phép giới hạn của 8th Wall. Xem [Permitted Use FAQ](https://8thwall.org/docs/migration/faq).

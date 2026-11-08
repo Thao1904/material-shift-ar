@@ -386,14 +386,14 @@ const qsmall = (wx, wy, wz) => qnorm([wx / 2, wy / 2, wz / 2, 1])
  * three faces, pin down depth and thickness much better than one face alone.
  * @returns {...sol, rms, matched}
  */
-export function refinePose(sol, blobs, K, cfg) {
+export function refinePose(sol, blobs, K, cfg, dots = null, radius = 0.5) {
   const pairs = [], used = new Set()
-  for (const d of allDots(cfg)) {
+  for (const d of (dots || allDots(cfg))) {
     const n = qrot(sol.quat, d.n), v = qrot(sol.quat, d.p)
     const c = [v[0] + sol.center[0], v[1] + sol.center[1], v[2] + sol.center[2]]
     if (-(n[0] * c[0] + n[1] * c[1] + n[2] * c[2]) / Math.hypot(...c) < 0.2) continue
     const px = [K.fx * c[0] / c[2] + K.cx, K.fy * c[1] / c[2] + K.cy]
-    const e = projectBlockPoint(sol, K, [d.p[0] + 0.5, d.p[1], d.p[2]])
+    const e = projectBlockPoint(sol, K, [d.p[0] + radius, d.p[1], d.p[2]])
     const r = Math.max(5, e ? Math.hypot(e[0] - px[0], e[1] - px[1]) : 5)
     let best = null, bd = r
     for (const b of blobs) { if (used.has(b)) continue; const dd = Math.hypot(b.x - px[0], b.y - px[1]); if (dd < bd) { bd = dd; best = b } }
