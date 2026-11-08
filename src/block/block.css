@@ -17,13 +17,13 @@ body.block { margin: 0 !important; position: fixed; inset: 0; }
 #startBtn { font: inherit; font-weight: 700; font-size: 16px; border: 0; border-radius: 14px; padding: 14px 18px; background: #ffd166; color: #1a1a1a; cursor: pointer; }
 .err { color: #ff8a80 !important; min-height: 1.2em; }
 
-#calib {
+#calib, #room {
   position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; max-height: 72vh; overflow: auto;
   background: rgba(250, 250, 248, .97); color: #172126; border-radius: 18px 18px 0 0;
   padding: 14px max(16px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 16px) max(16px, env(safe-area-inset-left, 0px));
   display: flex; flex-direction: column; gap: 10px; font-family: "Figtree", system-ui, sans-serif;
 }
-#calib[hidden] { display: none; }
+#calib[hidden], #room[hidden] { display: none; }
 .calib-head { display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
 .calib-head button, .calib-reset { font: inherit; font-weight: 600; border: 1px solid #d3d9da; background: #fff; color: #172126; border-radius: 10px; padding: 7px 12px; cursor: pointer; }
 .calib-note { margin: 0; font-size: 13px; color: #5a676d; }
@@ -32,3 +32,25 @@ body.block { margin: 0 !important; position: fixed; inset: 0; }
 .field small { display: block; color: #6b777c; font-size: 11.5px; }
 .field input { font: inherit; font-size: 16px; padding: 8px 10px; border: 1px solid #c9d0d2; border-radius: 9px; width: 100%; text-align: right; }
 .calib-reset { align-self: flex-start; }
+
+.room-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.room-row button { font: inherit; font-weight: 600; border: 1px solid #d3d9da; background: #fff; color: #172126; border-radius: 10px; padding: 9px 13px; cursor: pointer; }
+.room-row button.primary { background: #172126; color: #fff; border-color: #172126; }
+#roomInput { font: inherit; font-size: 16px; width: 96px; padding: 8px 10px; border: 1px solid #c9d0d2; border-radius: 9px; text-transform: uppercase; letter-spacing: .12em; }
+.room-code { margin: 0; font-size: 15px; }
+.room-code b { font-size: 26px; letter-spacing: .14em; margin-left: 6px; }
+#roomLink { display: block; font-size: 12px; background: #eef2f2; border-radius: 8px; padding: 8px; word-break: break-all; user-select: all; -webkit-user-select: all; }
+#roomLive { display: flex; flex-direction: column; gap: 8px; }
+#roomLive[hidden] { display: none; }
+
+.views { display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: auto; }
+.views[hidden] { display: none; }
+.seg { display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(12, 14, 15, .62); border: 1px solid rgba(255, 255, 255, .18);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); max-width: 100%; overflow-x: auto; }
+.seg button { font: inherit; font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, .8); background: none; border: 0; border-radius: 999px; padding: 7px 12px; white-space: nowrap; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: #fff; color: #161616; }
+#view-partner::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--dot, #fff); margin-right: 6px; vertical-align: 1px; }
+.mixrow { display: flex; align-items: center; gap: 10px; font-size: 12.5px; font-weight: 600; color: #fff; pointer-events: auto;
+  background: rgba(12, 14, 15, .55); padding: 6px 12px; border-radius: 999px; }
+.mixrow[hidden] { display: none; }
+.mixrow input { width: 150px; accent-color: #ffd166; }

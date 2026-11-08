@@ -14,7 +14,7 @@ Project có **hai chế độ**:
 | Trang | Vật thể | Cách nhận diện |
 |---|---|---|
 | `index.html` | Khối giấy in 6 marker (mục 1 bên dưới) | 8th Wall Image Targets |
-| `block.html` | **Khối gỗ trắng có 4 chấm đỏ ở góc mỗi mặt** | Bộ nhận diện chấm đỏ tự viết (mục 8) |
+| `block.html` | **Khối gỗ trắng có 4 chấm đỏ ở góc mỗi mặt** | Bộ nhận diện chấm đỏ tự viết (mục 8), hai người cùng xem (mục 9) |
 
 ---
 
@@ -216,6 +216,61 @@ Hai ảnh thật của khối nằm trong `tools/test/photos/`. Chạy `node too
 - Đừng để ngón tay che chấm. Cầm khối ở giữa các cạnh.
 - Cầm cách điện thoại 20–40 cm, nơi đủ sáng, tránh nền đỏ hoặc hồng ngay sau khối.
 - Bật **Debug** để xem: vòng xanh dương là các đốm đỏ tìm được, khung xanh lá là mặt đang dùng, kèm sai số và khoảng cách.
+
+---
+
+## 9. Hai người cùng xem một khối
+
+Hai điện thoại cùng nhìn **một khối**, mỗi người từ góc của mình. Mỗi người tự chọn vật liệu, rồi chọn cách xem:
+
+| Chế độ | Khối hiển thị |
+|---|---|
+| **Mine** | vật liệu của tôi |
+| **Phone XX · …** | vật liệu người kia đang chọn, cập nhật realtime |
+| **Mix** | **lớp chung**: hai vật liệu trộn thành từng mảng. Thanh trượt chỉnh tỉ lệ, và cả hai máy dùng chung tỉ lệ đó |
+
+Ngoài ra, mỗi máy còn thấy **chiếc điện thoại của người kia** hiện đúng chỗ người đó đang đứng (khung màu kèm tên và vật liệu). Đây là cách nhanh nhất để kiểm tra hai hệ toạ độ đã khớp.
+
+### Bước 1: Thêm chấm đen đánh dấu gốc
+
+Mặt khối hình vuông với 4 chấm đỏ giống nhau, nên mỗi máy không biết góc nào là "góc 0". Nếu không đánh dấu, hai máy có thể xoay khối lệch nhau 90°, và lớp Mix sẽ không trùng nhau. Cách làm:
+
+- Trên **mặt trên** của khối, chọn **một** chấm đỏ bất kỳ.
+- Vẽ một **chấm đen tròn, đường kính khoảng 5 mm**, cách chấm đỏ đó **0,8 cm về phía tâm theo cả hai cạnh** (tức lệch chéo khoảng 1,1 cm).
+- Để khối **nằm yên trên bàn, mặt có chấm đen hướng lên**.
+
+App chỉ tin hướng của khối sau khi đã thấy chấm đen (trạng thái hiện *aligned*). Nếu bạn vẽ lệch so với 0,8 cm, chỉnh **Black mark: offset** trong Calibrate.
+
+### Bước 2: Vào chung phòng
+
+1. Máy A: bấm **Room → Create room**. App hiện mã 4 ký tự và một link.
+2. Máy B: mở link đó, hoặc vào **Room** và gõ mã rồi bấm **Join**.
+3. Cả hai hướng camera vào khối cho tới khi thấy *aligned*.
+4. Mỗi người bấm chọn vật liệu, rồi dùng thanh **Mine / Phone XX / Mix** phía trên.
+
+### Cách hoạt động
+
+- **Mốc chung là chính khối gỗ.** Mỗi máy tự tính vị trí của khối so với camera của nó. Mọi thứ chia sẻ (hoa văn Mix, vị trí điện thoại) đều tính theo toạ độ của khối: đơn vị cm, gốc ở tâm khối, các trục cố định nhờ chấm đen. Vì vậy dù đứng ở góc nào, hai người cũng thấy cùng một chỗ trên khối thật.
+- **Hoa văn Mix** được tính bằng nhiễu 3D theo toạ độ khối (shader trong `src/material-shift.js`). Cả hai máy xếp hai vật liệu theo cùng một thứ tự, nên cùng một mảng sẽ là gỗ trên cả hai máy.
+- **Đồng bộ** qua MQTT trên WebSocket (`src/block/room.js`):
+  - `user/<id>`: tên và vật liệu của từng người, được giữ lại cho người vào sau.
+  - `pose/<id>`: vị trí camera theo toạ độ khối, gửi 5 lần mỗi giây.
+
+  Mặc định app dùng broker công khai `broker.emqx.io`, không cần tài khoản. Ai biết mã phòng đều vào được.
+- **Muốn chạy broker riêng** (ví dụ khi Wi-Fi chặn broker công khai): chạy `npm run broker` trên máy tính, rồi mở `block.html?broker=ws://<IP-máy-tính>:8888` trên cả hai điện thoại (cùng mạng Wi-Fi). Lưu ý: GitHub Pages là HTTPS, nên điện thoại có thể chặn `ws://`. Khi đó chạy app bằng `npm run serve` qua ngrok, hoặc dùng broker có `wss://`.
+
+### Độ chính xác cần biết
+
+- Sai lệch thường **dưới 1 cm** ở trên khối, và tăng dần khi đi ra xa khối.
+- Hai máy phải nhập **cùng số đo khối**, và mỗi máy nên chỉnh **Camera FOV** cho đúng với camera của mình.
+- Nếu khối bị che hoặc mất khỏi khung hình quá 1,5 giây, máy cần thấy lại chấm đen thì mới *aligned* trở lại.
+
+**Test:** `npm test` kiểm tra phép tính vị trí, nhận diện trên ảnh thật, và chấm đen ở 4 góc xoay. Bài test hai máy (hai trình duyệt có camera giả cùng một broker nội bộ) xác nhận các điểm sau:
+- cả hai máy đều aligned,
+- máy A thấy vật liệu B chọn,
+- lớp Mix giống nhau trên cả hai máy,
+- thanh trượt đồng bộ,
+- hai máy trao đổi được vị trí camera.
 
 ---
 

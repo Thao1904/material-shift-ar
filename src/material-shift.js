@@ -49,7 +49,7 @@ function makeSweepFrame(box, axis, mat) {
   return g
 }
 
-export function createMaterialShift({scene, camera, renderer, canvas, holdToCompare = true, box = {w: 1, h: 1, d: 1}, sweepAxis = 'y'}) {
+export function createMaterialShift({scene, camera, renderer, canvas, holdToCompare = true, box = {w: 1, h: 1, d: 1}, sweepAxis = 'y', onChip = null}) {
   const $ = id => document.getElementById(id)
 
   // ---------- rendering setup ----------
@@ -69,8 +69,36 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
     const plain = m.make()
     const clipIn = plain.clone(); clipIn.clippingPlanes = [planeIn]
     const clipOut = plain.clone(); clipOut.clippingPlanes = [planeOut]
-    return {plain, clipIn, clipOut}
+    return {plain, clipIn, clipOut, mix: makeMixMaterial(plain)}
   })
+
+  // ---------- mix overlay: another material shows through in noise patches ----------
+  // The noise is evaluated in BLOCK coordinates, so two phones aligned on the same block
+  // see the same patches on the same spots of the real block.
+  const mixU = {value: 0.5}, freqU = {value: 2.8 / Math.max(box.w, box.h, box.d)}
+  function makeMixMaterial(plain) {
+    const m = plain.clone()
+    m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -4
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.uMix = mixU; sh.uniforms.uFreq = freqU
+      sh.vertexShader = 'varying vec3 vMsLocal;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vMsLocal = position;')
+      sh.fragmentShader = `uniform float uMix; uniform float uFreq; varying vec3 vMsLocal;
+        float msH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+        float msN(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(msH(i), msH(i + vec3(1,0,0)), f.x), mix(msH(i + vec3(0,1,0)), msH(i + vec3(1,1,0)), f.x), f.y),
+                     mix(mix(msH(i + vec3(0,0,1)), msH(i + vec3(1,0,1)), f.x), mix(msH(i + vec3(0,1,1)), msH(i + vec3(1,1,1)), f.x), f.y), f.z); }
+        float msF(vec3 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * msN(p); p *= 2.03; a *= 0.5; } return s; }
+      ` + sh.fragmentShader
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+          float msVal = msF(vMsLocal * uFreq + 3.7);
+          float msThr = mix(0.2, 0.76, uMix);
+          if (msVal > msThr) discard;`)
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          diffuseColor.rgb *= mix(0.55, 1.0, smoothstep(0.0, 0.02, msThr - msVal));   // thin inlay seam`)
+    }
+    m.customProgramCacheKey = () => 'ms-mix'
+    return m
+  }
 
   // ---------- cube ----------
   const root = new THREE.Group()
@@ -80,8 +108,11 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   const meshA = new THREE.Mesh(geo, mats[0].plain)
   const meshB = new THREE.Mesh(geo, mats[0].clipIn)
   meshB.visible = false
+  const meshM = new THREE.Mesh(geo, mats[1].mix)
+  meshM.visible = false
+  meshM.renderOrder = 1
   meshA.castShadow = meshB.castShadow = true
-  root.add(meshA, meshB)
+  root.add(meshA, meshB, meshM)
 
   const axisVec = new THREE.Vector3(sweepAxis === 'x' ? 1 : 0, sweepAxis === 'y' ? 1 : 0, sweepAxis === 'z' ? 1 : 0)
   const ringMat = new THREE.MeshBasicMaterial({color: 0xfff0c2, transparent: true, opacity: 0, side: THREE.DoubleSide,
@@ -114,7 +145,8 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
     box = b
     const old = geo
     geo = makeBoxGeometry(box)
-    meshA.geometry = geo; meshB.geometry = geo
+    meshA.geometry = geo; meshB.geometry = geo; meshM.geometry = geo
+    freqU.value = 2.8 / Math.max(box.w, box.h, box.d)
     old.dispose()
     root.remove(ring)
     ring = makeSweepFrame(box, sweepAxis, ringMat); ring.renderOrder = 3
@@ -123,7 +155,7 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   }
 
   // ---------- state ----------
-  let current = 0, sweep = null
+  let current = 0, selected = 0, overlay = null, sweep = null
   let tracking = false, lastSeen = -1e9, popT = 0, bestName = null
   let comparing = false, tipMode = false
   let tipCandidate = null, tipSince = 0, tipCommitted = null
@@ -155,7 +187,7 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
         const sw = document.createElement('canvas'); sw.width = sw.height = 64
         sw.getContext('2d').drawImage(m.swatch, 0, 0, 512, 512, 0, 0, 64, 64)
         b.append(sw, document.createTextNode(m.label))
-        b.onclick = () => setMaterial(i)
+        b.onclick = () => (onChip ? onChip(i) : setMaterial(i))
         chips.appendChild(b)
       })
     }
@@ -171,8 +203,10 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
       debugGroup.visible = debug; wire.visible = debug
     }
     if (holdToCompare && canvas) {
-      const on = () => { comparing = true; $('compare')?.classList.add('on') }
-      const off = () => { comparing = false; $('compare')?.classList.remove('on') }
+      // a short tap stays free for other uses (placing objects); compare starts after a 280 ms hold
+      let holdT = null
+      const on = () => { clearTimeout(holdT); holdT = setTimeout(() => { comparing = true; $('compare')?.classList.add('on') }, 280) }
+      const off = () => { clearTimeout(holdT); comparing = false; $('compare')?.classList.remove('on') }
       canvas.addEventListener('pointerdown', on)
       canvas.addEventListener('pointerup', off)
       canvas.addEventListener('pointercancel', off)
@@ -181,7 +215,18 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
     syncChips()
   }
   function syncChips() {
-    lib.forEach((m, i) => $(`mat-${m.key}`)?.setAttribute('aria-pressed', i === current))
+    lib.forEach((m, i) => $(`mat-${m.key}`)?.setAttribute('aria-pressed', i === selected))
+  }
+  /** Which chip is highlighted (the person's own choice), independent of what is displayed. */
+  function setSelected(i) { selected = i; syncChips() }
+
+  /** Show material j through noise patches on top of the base material (null = off). */
+  function setOverlay(j, ratio = 0.5) {
+    overlay = j
+    mixU.value = ratio
+    if (j === null || j === undefined) { meshM.visible = false; return }
+    meshM.material = mats[j].mix
+    meshM.visible = true
   }
 
   // ---------- material switching ----------
@@ -192,15 +237,15 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
     ringMat.opacity = 0
     sweep = null
   }
-  function setMaterial(i) {
+  function setMaterial(i, quiet = false) {
     i = ((i % lib.length) + lib.length) % lib.length
-    if (i === current && !sweep) return
+    if (!onChip) selected = i
+    if (i === current && !sweep) { syncChips(); return }
     finishSweep()
     const from = current
     current = i
     syncChips()
-    toast(lib[i].label)
-    buzz(15)
+    if (!quiet) { toast(lib[i].label); buzz(15) }
     meshA.material = mats[from].clipOut
     meshB.material = mats[i].clipIn
     meshB.visible = true
@@ -233,7 +278,7 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
     const keyName = ['x', 'y', 'z'][i] + (_up.getComponent(i) > 0 ? '+' : '-')
     if (keyName !== tipCandidate) { tipCandidate = keyName; tipSince = now; return }
     if (now - tipSince < 350 || keyName === tipCommitted) return
-    if (tipCommitted !== null) setMaterial(current + 1)
+    if (tipCommitted !== null) { if (onChip) onChip((selected + 1) % lib.length); else setMaterial(current + 1) }
     tipCommitted = keyName
   }
 
@@ -321,5 +366,7 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
 
   buildUI()
   setStatus('Point the camera at any face of the block')
-  return {updateTargets, updateDirect, setPose, setBox, setStatus, tick, setMaterial, root, get current() { return current }}
+  return {updateTargets, updateDirect, setPose, setBox, setStatus, tick, setMaterial, setSelected, setOverlay, toast, root,
+    labels: lib.map(m => m.label), get current() { return current }, get selected() { return selected },
+    get overlay() { return overlay }, get tracking() { return tracking }}
 }

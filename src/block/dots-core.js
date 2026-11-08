@@ -269,16 +269,76 @@ export function solveQuad(q, K, models, prevQuat) {
         if (d > bestDot) { bestDot = d; pick = s }
       }
     }
-    if (!best || pick.err < best.err) best = pick
+    if (!best || pick.err < best.err) best = {...pick, alts: near}
   }
   return best
+}
+
+// ---------------------------------------------------------------- 5. origin mark
+
+const qrot = ([qx, qy, qz, qw], [x, y, z]) => {
+  const ix = qw * x + qy * z - qz * y, iy = qw * y + qz * x - qx * z, iz = qw * z + qx * y - qy * x, iw = -qx * x - qy * y - qz * z
+  return [ix * qw + iw * -qx + iy * -qz - iz * -qy, iy * qw + iw * -qy + iz * -qx - ix * -qz, iz * qw + iw * -qz + ix * -qy - iy * -qx]
+}
+
+/** Project a point given in block coordinates (cm) into the image. */
+export function projectBlockPoint(sol, K, p) {
+  const v = qrot(sol.quat, p)
+  const c = [v[0] + sol.center[0], v[1] + sol.center[1], v[2] + sol.center[2]]
+  return c[2] > 0 ? [K.fx * c[0] / c[2] + K.cx, K.fy * c[1] / c[2] + K.cy] : null
+}
+
+/**
+ * Where the black origin mark sits, in block coordinates: on the top face, next to the
+ * red dot at (-X, -Z), moved `markOffset` cm toward the center along both edges.
+ */
+export function markPoint(cfg) {
+  const a = cfg.W / 2 - cfg.topInset, b = cfg.D / 2 - cfg.topInset
+  return [-a + cfg.markOffset, cfg.T / 2, -b + cfg.markOffset]
+}
+
+/** Darkness score around an image point: share of dark, unsaturated-ish pixels in a small disc. */
+function darkScore(rgba, w, h, x, y, r, bright) {
+  let dark = 0, n = 0
+  const R = Math.max(1.5, r)
+  for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+    if (dx * dx + dy * dy > R * R) continue
+    const xi = Math.round(x + dx), yi = Math.round(y + dy)
+    if (xi < 0 || yi < 0 || xi >= w || yi >= h) continue
+    const p = (yi * w + xi) * 4, R_ = rgba[p], G = rgba[p + 1], B = rgba[p + 2]
+    const l = 0.299 * R_ + 0.587 * G + 0.114 * B
+    n++
+    if (l < bright * 0.45 && !(R_ > G * 1.4 && R_ > B * 1.3)) dark++       // dark, and not one of the red dots
+  }
+  return n ? dark / n : 0
+}
+
+/**
+ * Pick the symmetric solution whose projected mark lands on a dark dot.
+ * @returns {sol, score} (score 0 when no hypothesis shows the mark)
+ */
+export function resolveByMark(best, rgba, w, h, K, cfg) {
+  if (!best || best.model.name !== 'top' || !best.alts) return {sol: best, score: 0}
+  const bright = brightRef(rgba, w, h)
+  const mp = markPoint(cfg)
+  let pick = null, top = 0
+  for (const s of best.alts) {
+    const c = projectBlockPoint(s, K, mp)
+    if (!c) continue
+    // radius: projected size of ~0.2 cm at the mark (the drawn dot is ~5 mm wide)
+    const e = projectBlockPoint(s, K, [mp[0] + 0.2, mp[1], mp[2]])
+    const r = e ? Math.hypot(e[0] - c[0], e[1] - c[1]) : 2
+    const sc = darkScore(rgba, w, h, c[0], c[1], r, bright)
+    if (sc > top) { top = sc; pick = s }
+  }
+  return top >= 0.3 ? {sol: {...best, ...pick, alts: best.alts}, score: top} : {sol: best, score: 0}
 }
 
 /**
  * Full frame: blobs -> quads -> pose.
  * @returns {found, blobs, quad, model, center, quat, err}
  */
-export function trackFrame(rgba, w, h, K, models, prevQuat, maxErr = 0.15) {
+export function trackFrame(rgba, w, h, K, models, prevQuat, maxErr = 0.15, cfg = null) {
   const blobs = findRedBlobs(rgba, w, h)
   if (blobs.length < 4) return {found: false, blobs}
   const quads = candidateQuads(blobs, rgba, w, h)
@@ -291,5 +351,9 @@ export function trackFrame(rgba, w, h, K, models, prevQuat, maxErr = 0.15) {
     if (!best || score > best.score) best = {...s, quad: c.q, score}
   }
   if (!best) return {found: false, blobs}
-  return {found: true, blobs, ...best}
+  if (cfg && cfg.markOffset) {
+    const {sol, score} = resolveByMark(best, rgba, w, h, K, cfg)
+    return {found: true, blobs, ...sol, quad: best.quad, markScore: score}
+  }
+  return {found: true, blobs, ...best, markScore: 0}
 }

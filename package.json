@@ -7,13 +7,18 @@
     "build": "vite build",
     "preview": "vite preview",
     "markers": "python3 tools/make-markers.py",
-    "targets": "node tools/make-targets.mjs"
+    "targets": "node tools/make-targets.mjs",
+    "broker": "node tools/broker.mjs",
+    "test": "node tools/test/pose.test.mjs && node tools/test/dots.test.mjs && node tools/test/mark.test.mjs"
   },
   "dependencies": {
+    "mqtt": "^5.16.1",
     "three": "^0.183.2"
   },
   "devDependencies": {
     "@8thwall/image-target-cli": "^1.0.0",
+    "aedes": "^0.51.3",
+    "aedes-server-factory": "^0.2.1",
     "sharp": "^0.34.5",
     "vite": "^8.0.8"
   }

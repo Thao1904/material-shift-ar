@@ -4,6 +4,8 @@ import * as THREE from 'three'
 import {createMaterialShift} from '../material-shift.js'
 import {trackFrame, makeModels, intrinsics} from './dots-core.js'
 import {DEFAULT_BLOCK} from './config.js'
+import {createRoom, randomCode, DEFAULT_BROKER} from './room.js'
+import {createCommonLayer} from './common-layer.js'
 
 const $ = id => document.getElementById(id)
 const STORE = 'material-shift-block-v2'
@@ -23,8 +25,69 @@ const renderer = new THREE.WebGLRenderer({canvas: gl, antialias: true, alpha: tr
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
 const scene = new THREE.Scene()
 const camera = new THREE.PerspectiveCamera()        // stays at the origin; projection comes from the camera intrinsics
-const ctrl = createMaterialShift({scene, camera, renderer, canvas: gl, box: {w: cfg.W, h: cfg.T, d: cfg.D}, sweepAxis: 'x'})
+// My own material choice (the chips) is separate from what is displayed (mine / partner's / mix).
+let myMat = 0, viewMode = 'mine', mixRatio = 0.5
+const ctrl = createMaterialShift({scene, camera, renderer, canvas: gl, box: {w: cfg.W, h: cfg.T, d: cfg.D}, sweepAxis: 'x',
+  onChip: (i) => {
+    myMat = i
+    ctrl.setSelected(i)
+    if (room.code) room.setMaterial(i)
+    refreshDisplay(true)
+  }})
 ctrl.setStatus('Tap Start camera')
+
+// ---------- shared room ----------
+const params = new URLSearchParams(location.search)
+const room = createRoom({
+  broker: params.get('broker') || DEFAULT_BROKER,
+  onPeers: (map, poseOnly) => {
+    layer.setPeers(map, ctrl.labels)
+    if (!poseOnly) { refreshDisplay(false); renderRoomInfo(); renderViews() }
+  },
+  onStatus: (s, code, msg) => { roomStatus = s; renderRoomInfo(msg) },
+})
+let roomStatus = 'idle'
+const layer = createCommonLayer({scene, camera, ctrl})
+window.__room = room; window.__ms = ctrl
+
+/** The first other phone in the room (rooms are meant for two people). */
+function partner() {
+  const ids = [...room.peers.keys()].sort()
+  return ids.length ? room.peers.get(ids[0]) : null
+}
+
+/**
+ * The mixed common layer must look the same on every phone, so it does not depend on who
+ * is looking: the two people are ordered by id (first = base, second = patches), and the
+ * patch ratio is shared (latest slider change wins).
+ */
+function mixSetup() {
+  const p = partner()
+  if (!p) return null
+  const a = {id: room.me.id, material: myMat, mix: room.me.mix, mixAt: room.me.mixAt}
+  const [first, second] = [a, p].sort((x, y) => (x.id < y.id ? -1 : 1))
+  const latest = a.mixAt >= (p.mixAt || 0) ? a : p
+  return {base: first.material, over: second.material === first.material ? null : second.material, ratio: latest.mix ?? 0.5}
+}
+
+/** Decide what the block shows: my material, my partner's, or both mixed. */
+let shown = ''
+function refreshDisplay(byMe) {
+  const p = partner(), L = ctrl.labels
+  let base = myMat, over = null
+  if (p && viewMode === 'partner') base = p.material
+  if (p && viewMode === 'mix') { const m = mixSetup(); base = m.base; over = m.over; mixRatio = m.ratio }
+  ctrl.setMaterial(base, true)
+  ctrl.setOverlay(over, mixRatio)
+  const key = `${base}/${over}`
+  if (key !== shown) {
+    shown = key
+    ctrl.toast(over === null ? L[base] : `${L[base]} + ${L[over]}`)
+    if (!byMe && p) try { navigator.vibrate && navigator.vibrate(12) } catch (e) { /* not supported */ }
+  }
+}
+// alignment: the block frame is only trusted after the black origin mark has been seen
+let aligned = false, lastFound = -1e9
 
 // ---------- processing canvas ----------
 const proc = document.createElement('canvas')
@@ -65,17 +128,21 @@ function loop() {
     pctx.drawImage(video, 0, 0, pw, ph)
     const img = pctx.getImageData(0, 0, pw, ph)
     const t0 = performance.now()
-    const r = trackFrame(img.data, pw, ph, K, models, prevQuat)
+    const r = trackFrame(img.data, pw, ph, K, models, prevQuat, 0.15, cfg)
     cost = cost * 0.9 + (performance.now() - t0) * 0.1
     if (cost > 30 && PROC_LONG > 560) { PROC_LONG = 560; layout() }
     else if (cost < 12 && PROC_LONG < 720) { PROC_LONG = 720; layout() }
     last = r
     if (r.found) {
+      if (now - lastFound > 1500) aligned = false          // lost for a while: orientation must be re-confirmed
+      if (r.markScore > 0.3) aligned = true
+      lastFound = now
       prevQuat = r.quat
       pos.set(r.center[0], -r.center[1], -r.center[2])
       quat.set(...r.quat)
       quat.premultiply(FLIP)
-      ctrl.updateDirect(true, pos, quat, r.model.label, now)
+      const label = room.code ? `${r.model.label} · ${aligned ? 'aligned' : 'show the black mark'}` : r.model.label
+      ctrl.updateDirect(true, pos, quat, label, now)
     } else {
       ctrl.updateDirect(false, null, null, '', now)
     }
@@ -88,6 +155,8 @@ function loop() {
   } else {
     ctrl.tick()
   }
+  layer.update(aligned)
+  if (room.code && aligned && ctrl.tracking) { const c = layer.cameraInBlock(); room.publishPose(c.p, c.q) }
   renderer.render(scene, camera)
   drawDebug()
 }
@@ -107,7 +176,15 @@ function drawDebug() {
     dctx.closePath(); dctx.stroke()
   }
   dctx.fillStyle = '#fff'; dctx.font = `${13 * d}px ui-monospace, monospace`
-  const info = last.found ? `${last.model.name}  err ${last.err.toFixed(3)}  ${Math.hypot(...last.center).toFixed(1)} cm` : 'no face'
+  if (last.found && last.model.name === 'top') {            // where the origin mark is expected
+    const a = cfg.W / 2 - cfg.topInset, b = cfg.D / 2 - cfg.topInset
+    const v = new THREE.Vector3(-a + cfg.markOffset, cfg.T / 2, -b + cfg.markOffset)
+    v.applyQuaternion(quat).add(pos).project(camera)
+    const x = (v.x + 1) / 2 * innerWidth * d, y = (1 - v.y) / 2 * innerHeight * d
+    dctx.strokeStyle = last.markScore > 0.3 ? '#ffd166' : 'rgba(255,209,102,.45)'; dctx.lineWidth = 2 * d
+    dctx.beginPath(); dctx.arc(x, y, 11 * d, 0, 7); dctx.stroke()
+  }
+  const info = last.found ? `${last.model.name}  err ${last.err.toFixed(3)}  mark ${last.markScore.toFixed(2)}  ${Math.hypot(...last.center).toFixed(1)} cm` : 'no face'
   dctx.fillText(`${info}  ·  red blobs ${(last.blobs || []).length}  ·  ${fps} fps  ·  ${pw}x${ph}`, 12 * d, (innerHeight - 150) * d)
 }
 
@@ -126,6 +203,7 @@ $('startBtn').onclick = async () => {
     $('start').hidden = true
     $('hud').hidden = false
     ctrl.setStatus('Show the block: all 4 red dots of one face')
+    if (params.get('room')) joinRoom(params.get('room'))
   } catch (e) {
     $('startErr').textContent = e && e.name === 'NotAllowedError'
       ? 'Camera permission was denied. Allow camera access for this site in Settings, then reload.'
@@ -141,6 +219,7 @@ const FIELDS = [
   ['topInset', 'Big face: dot to edge (cm)', 'center of a dot to the nearest edge'],
   ['sideInsetX', 'Side face: dot to short edge (cm)', ''],
   ['sideInsetY', 'Side face: dot to long edge (cm)', ''],
+  ['markOffset', 'Black mark: offset (cm)', 'from its red dot toward the center, along each edge'],
   ['fov', 'Camera FOV (°)', 'raise if the overlay looks too big, lower if too small'],
 ]
 function buildCalib() {
@@ -169,4 +248,66 @@ $('calibReset').onclick = () => {
   ctrl.setBox({w: cfg.W, h: cfg.T, d: cfg.D}); layout(); buildCalib()
 }
 buildCalib()
+
+// ---------- room panel ----------
+function joinRoom(code) {
+  room.join(code, myMat)
+  const url = new URL(location.href); url.searchParams.set('room', room.code)
+  history.replaceState(null, '', url)
+  renderRoomInfo(); renderViews()
+}
+function renderRoomInfo(msg) {
+  const peers = room.peers.size
+  const pill = $('roomPill')
+  if (!room.code) { pill.textContent = 'Room'; $('roomInfo').textContent = 'Not in a room. Create one, or type the code from the other phone.'; $('roomLive').hidden = true; return }
+  const st = {connecting: 'connecting…', connected: `${peers + 1} phone${peers ? 's' : ''}`, offline: 'offline, retrying…', error: 'connection error'}[roomStatus] || roomStatus
+  pill.textContent = `Room ${room.code} · ${st}`
+  $('roomLive').hidden = false
+  $('roomCode').textContent = room.code
+  const link = new URL(location.href); link.searchParams.set('room', room.code); link.searchParams.delete('broker')
+  if (params.get('broker')) link.searchParams.set('broker', params.get('broker'))
+  $('roomLink').textContent = link.href
+  const L = ctrl.labels
+  $('roomInfo').textContent = msg ? `${st} (${msg})` : `You are ${room.me.name}. ${peers ? [...room.peers.values()].map(p => `${p.name} (${L[p.material]})`).join(', ') + ' connected.' : 'Waiting for the other phone…'}`
+}
+$('roomPill').onclick = () => { $('room').hidden = !$('room').hidden; renderRoomInfo() }
+$('roomClose').onclick = () => { $('room').hidden = true }
+$('roomCreate').onclick = () => joinRoom(randomCode())
+$('roomJoin').onclick = () => { const c = $('roomInput').value.trim(); if (c) joinRoom(c) }
+$('roomInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('roomJoin').click() })
+$('roomLeave').onclick = () => { room.leave(); viewMode = 'mine'; refreshDisplay(true); renderRoomInfo(); renderViews() }
+$('roomCopy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('roomLink').textContent); $('roomCopy').textContent = 'Copied' }
+  catch (e) { const r = document.createRange(); r.selectNodeContents($('roomLink')); getSelection().removeAllRanges(); getSelection().addRange(r) }
+  setTimeout(() => { $('roomCopy').textContent = 'Copy link' }, 1500)
+}
+// ---------- view switch: Mine / Partner / Mix ----------
+function renderViews() {
+  const p = partner(), L = ctrl.labels
+  $('views').hidden = !p
+  if (!p) return
+  const seg = $('viewSeg')
+  const items = [['mine', `Mine · ${L[myMat]}`], ['partner', `${p.name} · ${L[p.material]}`], ['mix', 'Mix']]
+  seg.innerHTML = ''
+  for (const [k, label] of items) {
+    const b = document.createElement('button')
+    b.type = 'button'; b.id = `view-${k}`; b.textContent = label
+    b.setAttribute('aria-pressed', viewMode === k)
+    if (k === 'partner') b.style.setProperty('--dot', p.color)
+    b.onclick = () => { viewMode = k; refreshDisplay(true); renderViews() }
+    seg.appendChild(b)
+  }
+  $('mixRow').hidden = viewMode !== 'mix'
+  const m = mixSetup()
+  $('mixA').textContent = L[m.base]; $('mixB').textContent = m.over === null ? L[m.base] : L[m.over]
+  if (document.activeElement !== $('mixRange')) $('mixRange').value = Math.round(m.ratio * 100)
+}
+let mixSend = null
+$('mixRange').addEventListener('input', () => {
+  mixRatio = $('mixRange').value / 100
+  ctrl.setOverlay(ctrl.overlay, mixRatio)
+  room.me.mix = mixRatio; room.me.mixAt = Date.now()
+  clearTimeout(mixSend); mixSend = setTimeout(() => room.setMix(mixRatio), 120)    // throttle network updates
+})
+renderRoomInfo()
 requestAnimationFrame(loop)
