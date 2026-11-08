@@ -112,7 +112,29 @@ function tex(canvas, color = true) {
 }
 
 /** Returns [{key, label, swatch(canvas), make(): Material}] */
-export function createMaterialLibrary() {
+function swatch(hex) {
+  const c = document.createElement('canvas'); c.width = c.height = 512
+  const g = c.getContext('2d'), gr = g.createRadialGradient(190, 170, 30, 256, 256, 360)
+  const col = new THREE.Color(hex)
+  gr.addColorStop(0, `#${col.clone().lerp(new THREE.Color(0xffffff), 0.35).getHexString()}`)
+  gr.addColorStop(1, `#${col.getHexString()}`)
+  g.fillStyle = gr; g.fillRect(0, 0, 512, 512)
+  return c
+}
+
+/** Glossy plastic colors, e.g. [{key:'red', label:'Red', hex:0xe0453a}] */
+export function colorMaterials(colors) {
+  return colors.map(c => ({
+    key: c.key, label: c.label, swatch: swatch(c.hex),
+    make: () => new THREE.MeshPhysicalMaterial({color: c.hex, roughness: 0.32, clearcoat: 0.8, clearcoatRoughness: 0.15}),
+  }))
+}
+
+export function createMaterialLibrary(colors = []) {
+  return [...baseMaterials(), ...colorMaterials(colors)]
+}
+
+function baseMaterials() {
   const wood = woodCanvas(), marble = marbleCanvas(), metal = metalCanvas(), white = whiteCanvas()
   return [
     {

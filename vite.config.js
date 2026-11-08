@@ -10,6 +10,7 @@ export default defineConfig({
       input: {
         main: 'index.html',     // printed marker cube (8th Wall image targets)
         block: 'block.html',    // white block with red corner dots
+        pen: 'pen.html',        // any pen with two neon stickers
       },
     },
   },

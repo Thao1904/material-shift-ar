@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Material Shift · Pens</title>
+    <meta name="description" content="Put two neon stickers on any pen and give every pen in view a new material or color.">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@500;600;700&display=swap">
+    <link rel="stylesheet" href="src/index.css">
+    <link rel="stylesheet" href="src/block/block.css">
+  </head>
+  <body class="block">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="bg"></canvas>
+    <canvas id="gl"></canvas>
+    <canvas id="dbg"></canvas>
+
+    <div id="start">
+      <div class="start-card">
+        <h1>Material Shift · Pens</h1>
+        <p>Put two neon stickers on each pen, one near each end. Hold the pens 15–40 cm from the phone with both stickers visible.</p>
+        <button id="startBtn" type="button">Start camera</button>
+        <p class="err" id="startErr"></p>
+      </div>
+    </div>
+
+    <div id="hud" hidden>
+      <div class="top">
+        <span class="pill" id="status"><i></i><span>Show a pen with 2 neon stickers</span></span>
+        <div class="topbtns">
+          <button class="pill btn" id="calibBtn" type="button">Calibrate</button>
+          <button class="pill btn" id="debugBtn" type="button" aria-pressed="false">Debug</button>
+        </div>
+      </div>
+      <div class="matname" id="matname"></div>
+      <div class="swipe-line" id="swipeLine" hidden></div>
+      <div class="swipe-label" id="swipeLabel"></div>
+      <div class="compare" id="compare">Real pens</div>
+      <div class="bottom">
+        <p class="help">Swipe = all pens · tap a pen = just that pen · hold = real pens</p>
+        <div class="chips" id="chips"></div>
+      </div>
+    </div>
+
+    <div id="calib" hidden>
+      <div class="calib-head"><b>Pen settings</b><button id="calibClose" type="button">Done</button></div>
+      <p class="calib-note">Measure one pen with a ruler. Values are saved on this phone.</p>
+      <div id="calibFields"></div>
+      <button id="calibReset" class="calib-reset" type="button">Reset to defaults</button>
+    </div>
+
+    <script type="module" src="src/pen/pen-app.js"></script>
+  </body>
+</html>

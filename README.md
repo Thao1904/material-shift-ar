@@ -15,6 +15,7 @@ Project có **hai chế độ**:
 |---|---|---|
 | `index.html` | Khối giấy in 6 marker (mục 1 bên dưới) | 8th Wall Image Targets |
 | `block.html` | **Khối gỗ trắng có 4 chấm đỏ ở góc mỗi mặt** | Bộ nhận diện chấm đỏ tự viết (mục 8), hai người cùng xem (mục 9) |
+| `pen.html` | **Bút bất kỳ có 2 sticker neon**, nhiều bút cùng lúc | Bộ nhận diện sticker tự viết (mục 10) |
 
 ---
 
@@ -291,6 +292,42 @@ Thứ tự lớp là **Mine ← Mix → người kia**, lớp chung nằm giữa
 - lớp Mix giống nhau trên cả hai máy,
 - thanh trượt đồng bộ,
 - hai máy trao đổi được vị trí camera.
+
+---
+
+## 10. Bút bất kỳ với 2 sticker (`pen.html`)
+
+Mở `https://<tên-bạn>.github.io/material-shift-ar/pen.html`. **Mọi cây bút** trong khung hình có 2 sticker neon đều được phủ vật liệu hoặc màu.
+
+**Chuẩn bị:**
+- Dán **2 sticker màu neon** (xanh chuối là tốt nhất) lên mỗi cây bút, mỗi sticker gần một đầu, quấn quanh thân bút.
+- **Không dùng sticker trắng**: trên thân bút trắng, camera không tách được sticker ra khỏi bút.
+- Đo một cây bút rồi nhập vào **Calibrate**: khoảng cách tâm hai sticker, chiều dài bút. Mặc định là 12 cm và 14,5 cm.
+
+**Thao tác:**
+- **Vuốt ngang:** đổi vật liệu cho tất cả các bút, với đường chia chạy theo ngón tay. Có 8 lựa chọn: Wood, Marble, Metal, White, Red, Blue, Yellow, Black.
+- **Chạm vào một cây bút:** chỉ cây đó đổi sang vật liệu riêng. Chạm tiếp để đổi tiếp. Khi vòng về đúng vật liệu chung, cây bút đi theo cả nhóm trở lại.
+- **Giữ ngón tay:** xem các bút thật.
+
+**Cách hoạt động** (`src/pen/pen-core.js`, `src/pen/pens.js`):
+
+1. Tìm các đốm có màu sticker. Dải màu chỉnh được trong Calibrate: xanh chuối khoảng 70–125°, vàng khoảng 50°, hồng khoảng 320°.
+2. **Ghép thành từng cây bút.** Hai sticker được ghép với nhau khi:
+   - độ rộng gần bằng nhau,
+   - tỉ lệ *khoảng cách / độ rộng* khớp với tỉ lệ *khoảng cách sticker / đường kính bút*,
+   - giữa chúng có **thân bút thật**, tức hai cạnh song song dọc theo đoạn nối.
+
+   Nhờ vậy sticker của bút này không bị ghép nhầm sang bút bên cạnh.
+3. **Từ 2 điểm ra 3D.** Độ rộng của sticker tính theo chiều ngang thân bút không bị co lại khi bút nghiêng. Vì vậy:
+   - tỉ lệ độ rộng hai đầu cho biết đầu nào gần camera hơn,
+   - khoảng cách thật giữa hai sticker cho biết khoảng cách tuyệt đối.
+
+   Bút tròn nên không cần biết nó xoay quanh trục thế nào.
+4. **Độ dày từng cây được đo trực tiếp**, nên bút to hay nhỏ đều được phủ vừa.
+
+Nếu bạn đã tự đo FOV camera ở trang khối gỗ, trang bút dùng lại con số đó.
+
+**Test:** `node tools/test/pens.test.mjs` chạy với 1, 2 và 3 cây bút trong cùng một khung hình.
 
 ---
 

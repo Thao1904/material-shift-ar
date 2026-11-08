@@ -49,7 +49,12 @@ function makeSweepFrame(box, axis, mat) {
   return g
 }
 
-export function createMaterialShift({scene, camera, renderer, canvas, holdToCompare = true, box = {w: 1, h: 1, d: 1}, sweepAxis = 'y', onChip = null, cover = COVER}) {
+export function createMaterialShift({scene, camera, renderer, canvas, holdToCompare = true, box = {w: 1, h: 1, d: 1}, sweepAxis = 'y', onChip = null, cover = COVER, shape = null, colors = []}) {
+  // shape: null = box, or {type: 'capsule', r, len} (a pen), built along Y
+  const makeGeo = () => (shape && shape.type === 'capsule'
+    ? new THREE.CapsuleGeometry(shape.r * cover, Math.max(0.01, shape.len - 2 * shape.r), 10, 40)
+    : makeBoxGeometry(box, cover))
+  if (shape && shape.type === 'capsule') box = {w: 2 * shape.r, h: shape.len, d: 2 * shape.r}
   const $ = id => document.getElementById(id)
 
   // ---------- rendering setup ----------
@@ -63,7 +68,7 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   scene.add(hemi, key, key.target)
 
   // ---------- materials: plain + two clipped variants for the sweep ----------
-  const lib = createMaterialLibrary()
+  const lib = createMaterialLibrary(colors)
   const planeIn = new THREE.Plane(), planeOut = new THREE.Plane()
   const mats = lib.map((m) => {
     const plain = m.make()
@@ -106,7 +111,7 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   const root = new THREE.Group()
   root.visible = false
   scene.add(root)
-  let geo = makeBoxGeometry(box, cover)
+  let geo = makeGeo()
   const meshA = new THREE.Mesh(geo, mats[0].plain)
   const meshB = new THREE.Mesh(geo, mats[0].clipIn)
   meshB.visible = false
@@ -145,11 +150,11 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   wire.scale.set(box.w, box.h, box.d)
   root.add(wire)
 
-  /** Change the box size (e.g. after calibration). */
+  /** Change the size (e.g. after calibration): a box {w,h,d}, or a capsule {type:'capsule', r, len}. */
   function setBox(b) {
-    box = b
+    if (b.type === 'capsule') { shape = b; box = {w: 2 * b.r, h: b.len, d: 2 * b.r} } else box = b
     const old = geo
-    geo = makeBoxGeometry(box, cover)
+    geo = makeGeo()
     meshA.geometry = geo; meshB.geometry = geo; meshM.geometry = geo; meshM2.geometry = geo
     freqU.value = 2.8 / Math.max(box.w, box.h, box.d)
     old.dispose()
