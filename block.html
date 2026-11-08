@@ -11,6 +11,7 @@
   </head>
   <body class="block">
     <video id="video" playsinline muted autoplay></video>
+    <canvas id="bg"></canvas>
     <canvas id="gl"></canvas>
     <canvas id="dbg"></canvas>
 
@@ -68,7 +69,7 @@
       <div class="calib-head"><b>Block measurements</b><button id="calibClose" type="button">Done</button></div>
       <p class="calib-note">Measure your block with a ruler. Values are saved on this phone.</p>
       <div id="calibFields"></div>
-      <button id="calibReset" class="calib-reset" type="button">Reset to defaults</button>
+      <div class="room-row"><button id="calibCamera" class="calib-reset" type="button">Re-calibrate camera</button><button id="calibReset" class="calib-reset" type="button">Reset to defaults</button></div>
     </div>
 
     <script type="module" src="src/block/block-app.js"></script>

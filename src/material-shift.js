@@ -16,9 +16,9 @@ const easeInOut = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 
 const easeOut = t => 1 - Math.pow(1 - t, 3)
 
 // Box geometry with UVs projected by face, so textures keep their real proportions on thin sides.
-function makeBoxGeometry(box) {
+function makeBoxGeometry(box, cover = COVER) {
   const r = Math.min(box.w, box.h, box.d) * 0.035
-  const g = new RoundedBoxGeometry(box.w * COVER, box.h * COVER, box.d * COVER, 4, r)
+  const g = new RoundedBoxGeometry(box.w * cover, box.h * cover, box.d * cover, 4, r)
   const pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv
   const k = 1 / Math.max(box.w, box.h, box.d)
   for (let i = 0; i < pos.count; i++) {
@@ -49,7 +49,7 @@ function makeSweepFrame(box, axis, mat) {
   return g
 }
 
-export function createMaterialShift({scene, camera, renderer, canvas, holdToCompare = true, box = {w: 1, h: 1, d: 1}, sweepAxis = 'y', onChip = null}) {
+export function createMaterialShift({scene, camera, renderer, canvas, holdToCompare = true, box = {w: 1, h: 1, d: 1}, sweepAxis = 'y', onChip = null, cover = COVER}) {
   const $ = id => document.getElementById(id)
 
   // ---------- rendering setup ----------
@@ -106,7 +106,7 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   const root = new THREE.Group()
   root.visible = false
   scene.add(root)
-  let geo = makeBoxGeometry(box)
+  let geo = makeBoxGeometry(box, cover)
   const meshA = new THREE.Mesh(geo, mats[0].plain)
   const meshB = new THREE.Mesh(geo, mats[0].clipIn)
   meshB.visible = false
@@ -149,7 +149,7 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   function setBox(b) {
     box = b
     const old = geo
-    geo = makeBoxGeometry(box)
+    geo = makeBoxGeometry(box, cover)
     meshA.geometry = geo; meshB.geometry = geo; meshM.geometry = geo; meshM2.geometry = geo
     freqU.value = 2.8 / Math.max(box.w, box.h, box.d)
     old.dispose()
@@ -353,7 +353,11 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   // ---------- pose input ----------
   function applyPose(dt, now) {
     if (!tracking) return
-    const a = 1 - Math.exp(-dt * SMOOTHING)
+    // adaptive: smooth when the object is still (no jitter), near-instant when it moves (no lag)
+    const ang = 2 * Math.acos(Math.min(1, Math.abs(pose.quat.dot(cand.quat))))
+    const mv = pose.pos.distanceTo(cand.pos) / (Math.max(box.w, box.h, box.d) * Math.max(pose.scale, 1e-6))
+    const speed = Math.min(1, ang * 5 + mv * 8)
+    const a = 1 - Math.exp(-dt * (SMOOTHING * 0.4 + 50 * speed))
     if (popT === 0) {                                                  // first frame after (re)found: snap
       pose.pos.copy(cand.pos); pose.quat.copy(cand.quat)
     } else {

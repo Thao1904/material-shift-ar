@@ -271,6 +271,14 @@ Thứ tự lớp là **Mine ← Mix → người kia**, lớp chung nằm giữa
   Mặc định app dùng broker công khai `broker.emqx.io`, không cần tài khoản. Ai biết mã phòng đều vào được.
 - **Muốn chạy broker riêng** (ví dụ khi Wi-Fi chặn broker công khai): chạy `npm run broker` trên máy tính, rồi mở `block.html?broker=ws://<IP-máy-tính>:8888` trên cả hai điện thoại (cùng mạng Wi-Fi). Lưu ý: GitHub Pages là HTTPS, nên điện thoại có thể chặn `ws://`. Khi đó chạy app bằng `npm run serve` qua ngrok, hoặc dùng broker có `wss://`.
 
+### Để vật liệu ôm sát khối
+
+- **Tự đo góc nhìn camera.** Lần đầu bạn mở app trên một máy, dòng trạng thái hiện *calibrating camera …%*. Cầm khối và **nghiêng từ từ theo nhiều hướng** sao cho mặt lớn hiện xiên. App dùng hình vuông 4 chấm để tính FOV thật của camera máy đó, rồi lưu lại. Muốn đo lại thì vào Calibrate → **Re-calibrate camera**. Nếu bạn tự gõ FOV, app sẽ dùng số đó và ngừng tự đo.
+- **Dùng mọi chấm nhìn thấy được.** Khi đã có vị trí từ 4 chấm của một mặt, app tìm thêm các chấm trên mặt bên rồi tinh chỉnh lại (Gauss-Newton trên sai số chiếu). Nhờ vậy độ dày và các cạnh khớp hơn.
+- **Không bị trôi.** Hình camera trên màn hình chính là khung hình app vừa phân tích, nên vật liệu không bị lệch khỏi khối khi bạn di chuyển.
+- **Làm mượt thích ứng:** khối đứng yên thì vật liệu mượt, khối di chuyển thì vật liệu bám theo gần như tức thì.
+- **Nên đo bằng thước** khoảng cách từ chấm đến mép (Calibrate). Đây là phần còn lại khiến cạnh có thể lệch vài mm.
+
 ### Độ chính xác cần biết
 
 - Sai lệch thường **dưới 1 cm** ở trên khối, và tăng dần khi đi ra xa khối.

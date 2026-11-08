@@ -2,7 +2,7 @@
 // Camera (getUserMedia) -> red-dot tracker (dots-core.js) -> three.js materials.
 import * as THREE from 'three'
 import {createMaterialShift} from '../material-shift.js'
-import {trackFrame, makeModels, intrinsics} from './dots-core.js'
+import {trackFrame, makeModels, intrinsics, fovFromSquare} from './dots-core.js'
 import {DEFAULT_BLOCK} from './config.js'
 import {createRoom, randomCode, DEFAULT_BROKER} from './room.js'
 import {createCommonLayer} from './common-layer.js'
@@ -27,7 +27,7 @@ const scene = new THREE.Scene()
 const camera = new THREE.PerspectiveCamera()        // stays at the origin; projection comes from the camera intrinsics
 // My own material choice (the chips) is separate from what is displayed (mine / partner's / mix).
 let myMat = 0, viewMode = 'mine', mixRatio = 0.5
-const ctrl = createMaterialShift({scene, camera, renderer, canvas: gl, box: {w: cfg.W, h: cfg.T, d: cfg.D}, sweepAxis: 'x',
+const ctrl = createMaterialShift({scene, camera, renderer, canvas: gl, box: {w: cfg.W, h: cfg.T, d: cfg.D}, sweepAxis: 'x', cover: 1.012,
   onChip: (i) => {
     myMat = i
     ctrl.setSelected(i)
@@ -120,6 +120,7 @@ function layout() {
   K = intrinsics(pw, ph, cfg.fov)
   const sw = innerWidth, sh = innerHeight
   renderer.setSize(sw, sh, false)
+  bg.width = Math.round(sw * devicePixelRatio); bg.height = Math.round(sh * devicePixelRatio)
   dbg.width = sw * devicePixelRatio; dbg.height = sh * devicePixelRatio
   // the <video> uses object-fit: cover; mirror that crop in the 3D projection
   const sc = Math.max(sw / pw, sh / ph), visW = sw / sc, visH = sh / sc
@@ -133,6 +134,36 @@ function layout() {
 }
 addEventListener('resize', layout)
 
+// ---------- camera background: the very frame that was analysed ----------
+const bg = $('bg'), bgctx = bg.getContext('2d')
+function drawBackground() {
+  const vw = video.videoWidth, vh = video.videoHeight, W = bg.width, H = bg.height
+  const s = Math.max(W / vw, H / vh), sw = W / s, sh = H / s
+  bgctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, W, H)
+}
+
+// ---------- camera FOV self-calibration ----------
+// The 4 dots of a big face form a known square; seen at an angle, its perspective gives the
+// camera's focal length. We collect estimates from tilted views and keep a weighted median.
+const FOV_NEEDED = 40
+let fovSamples = []
+function feedFov(r) {
+  if (cfg.fovManual || r.model.name !== 'top' || r.err > 0.08) return
+  for (const e of fovFromSquare(r.quad, pw, ph, models[0].pts)) if (e.w > 0.1) fovSamples.push(e)
+  if (fovSamples.length > 160) fovSamples.splice(0, fovSamples.length - 160)
+  if (fovSamples.length < FOV_NEEDED) return
+  const sorted = fovSamples.slice().sort((a, b) => a.fov - b.fov)
+  const total = sorted.reduce((a, e) => a + e.w, 0)
+  let acc = 0, med = sorted[0].fov
+  for (const e of sorted) { acc += e.w; if (acc >= total / 2) { med = e.fov; break } }
+  if (!cfg.fovCalibrated || Math.abs(med - cfg.fov) > 0.6) {
+    const first = !cfg.fovCalibrated
+    cfg.fov = Math.round(med * 10) / 10; cfg.fovCalibrated = true; saveCfg(); layout()
+    const inp = $('cal-fov'); if (inp) inp.value = cfg.fov
+    if (first) ctrl.toast(`Camera calibrated · ${cfg.fov.toFixed(1)}°`)
+  }
+}
+
 // ---------- frame loop ----------
 const FLIP = new THREE.Quaternion(1, 0, 0, 0)      // OpenCV camera (y down, z forward) -> three.js camera
 const pos = new THREE.Vector3(), quat = new THREE.Quaternion()
@@ -143,6 +174,7 @@ function loop() {
   const now = performance.now()
   if (video.readyState >= 2 && K) {
     pctx.drawImage(video, 0, 0, pw, ph)
+    drawBackground()                                         // show exactly the frame we analyse: no swimming
     const img = pctx.getImageData(0, 0, pw, ph)
     const t0 = performance.now()
     const r = trackFrame(img.data, pw, ph, K, models, prevQuat, 0.15, cfg)
@@ -168,7 +200,9 @@ function loop() {
       pos.set(r.center[0], -r.center[1], -r.center[2])
       quat.set(...r.quat)
       quat.premultiply(FLIP)
-      const label = room.code ? `${r.model.label} · ${aligned ? 'aligned' : 'show the black mark'}` : r.model.label
+      feedFov(r)
+      let label = room.code ? `${r.model.label} · ${aligned ? 'aligned' : 'show the black mark'}` : r.model.label
+      if (!cfg.fovCalibrated) label += ` · calibrating camera ${Math.min(99, Math.round(fovSamples.length / FOV_NEEDED * 100))}%, tilt slowly`
       ctrl.updateDirect(true, pos, quat, label, now)
     } else {
       ctrl.updateDirect(false, null, null, '', now)
@@ -260,7 +294,9 @@ function buildCalib() {
     inp.oninput = () => {
       const v = parseFloat(inp.value)
       if (!isFinite(v) || v <= 0) return
-      cfg[k] = v; saveCfg()
+      cfg[k] = v
+      if (k === 'fov') { cfg.fovCalibrated = true; cfg.fovManual = true }   // a typed FOV wins over auto-calibration
+      saveCfg()
       models = makeModels(cfg)
       ctrl.setBox({w: cfg.W, h: cfg.T, d: cfg.D})
       layout()
@@ -271,8 +307,13 @@ function buildCalib() {
 $('calibBtn').onclick = () => { $('calib').hidden = !$('calib').hidden }
 $('calibClose').onclick = () => { $('calib').hidden = true }
 $('calibReset').onclick = () => {
-  cfg = {...DEFAULT_BLOCK}; saveCfg(); models = makeModels(cfg)
+  cfg = {...DEFAULT_BLOCK}; saveCfg(); models = makeModels(cfg); fovSamples = []
   ctrl.setBox({w: cfg.W, h: cfg.T, d: cfg.D}); layout(); buildCalib()
+}
+$('calibCamera').onclick = () => {
+  fovSamples = []; cfg.fovCalibrated = false; cfg.fovManual = false; saveCfg()
+  $('calib').hidden = true
+  ctrl.toast('Tilt the block slowly')
 }
 buildCalib()
 

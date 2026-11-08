@@ -370,6 +370,92 @@ export function support(sol, blobs, quad, K, cfg) {
   return {pred, hit}
 }
 
+// ---------------------------------------------------------------- 6. refinement + self-calibration
+
+const qmul = (a, b) => [
+  a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+  a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+  a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+  a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]]
+const qnorm = q => { const l = Math.hypot(...q); return q.map(v => v / l) }
+const qsmall = (wx, wy, wz) => qnorm([wx / 2, wy / 2, wz / 2, 1])
+
+/**
+ * Refine a pose with every red dot it can explain (the 4 fitted ones plus dots on the other
+ * visible faces), by Gauss-Newton on the reprojection error. More dots, spread over two or
+ * three faces, pin down depth and thickness much better than one face alone.
+ * @returns {...sol, rms, matched}
+ */
+export function refinePose(sol, blobs, K, cfg) {
+  const pairs = [], used = new Set()
+  for (const d of allDots(cfg)) {
+    const n = qrot(sol.quat, d.n), v = qrot(sol.quat, d.p)
+    const c = [v[0] + sol.center[0], v[1] + sol.center[1], v[2] + sol.center[2]]
+    if (-(n[0] * c[0] + n[1] * c[1] + n[2] * c[2]) / Math.hypot(...c) < 0.2) continue
+    const px = [K.fx * c[0] / c[2] + K.cx, K.fy * c[1] / c[2] + K.cy]
+    const e = projectBlockPoint(sol, K, [d.p[0] + 0.5, d.p[1], d.p[2]])
+    const r = Math.max(5, e ? Math.hypot(e[0] - px[0], e[1] - px[1]) : 5)
+    let best = null, bd = r
+    for (const b of blobs) { if (used.has(b)) continue; const dd = Math.hypot(b.x - px[0], b.y - px[1]); if (dd < bd) { bd = dd; best = b } }
+    if (best) { used.add(best); pairs.push({P: d.p, u: best.x, v: best.y}) }
+  }
+  if (pairs.length < 5) return {...sol, matched: pairs.length}
+  let q = sol.quat.slice(), t = sol.center.slice()
+  const resid = (qq, tt) => {
+    const r = []
+    for (const pr of pairs) {
+      const v = qrot(qq, pr.P), c = [v[0] + tt[0], v[1] + tt[1], v[2] + tt[2]]
+      if (c[2] <= 0.1) { r.push(1e3, 1e3); continue }
+      r.push(K.fx * c[0] / c[2] + K.cx - pr.u, K.fy * c[1] / c[2] + K.cy - pr.v)
+    }
+    return r
+  }
+  const apply = (qq, tt, d) => [qnorm(qmul(qsmall(d[0], d[1], d[2]), qq)), [tt[0] + d[3], tt[1] + d[4], tt[2] + d[5]]]
+  const sq = r => r.reduce((a, x) => a + x * x, 0)
+  let r0 = resid(q, t), e0 = sq(r0)
+  const start = Math.sqrt(e0 / pairs.length)
+  let lam = 1e-3
+  for (let it = 0; it < 8; it++) {
+    const J = []
+    const eps = [1e-4, 1e-4, 1e-4, 1e-3, 1e-3, 1e-3]
+    for (let k = 0; k < 6; k++) {
+      const d = [0, 0, 0, 0, 0, 0]; d[k] = eps[k]
+      const [qq, tt] = apply(q, t, d)
+      const rk = resid(qq, tt)
+      J.push(rk.map((x, i) => (x - r0[i]) / eps[k]))
+    }
+    const A = Array.from({length: 6}, (_, i) => Array.from({length: 6}, (_, j) => J[i].reduce((a, x, n) => a + x * J[j][n], 0) + (i === j ? lam * (1 + J[i].reduce((a, x) => a + x * x, 0)) : 0)))
+    const g = J.map(row => -row.reduce((a, x, n) => a + x * r0[n], 0))
+    const d = solve(A, g)
+    if (!d) break
+    const [qq, tt] = apply(q, t, d)
+    const r1 = resid(qq, tt), e1 = sq(r1)
+    if (e1 < e0) { q = qq; t = tt; r0 = r1; lam *= 0.3; if (e0 - e1 < 1e-4 * e0) { e0 = e1; break } e0 = e1 } else lam *= 10
+  }
+  const rms = Math.sqrt(e0 / pairs.length)
+  return rms <= start ? {...sol, quat: q, center: t, rms, matched: pairs.length} : {...sol, rms: start, matched: pairs.length}
+}
+
+/**
+ * Focal length (px) from the big face's dot SQUARE, with the principal point at the image center
+ * (Zhang's two constraints). Returns [{fov, w}] in degrees along the longer image side; w is how
+ * informative the view is (frontal views carry no focal information).
+ */
+export function fovFromSquare(quad, w, h, pts) {
+  const cx = w / 2, cy = h / 2
+  const H = homography(pts, quad.map(p => [p.x - cx, p.y - cy]))
+  if (!H) return []
+  const [h11, h12, , h21, h22, , h31, h32] = H
+  const s = Math.max(w, h)
+  const out = []
+  const toFov = f2 => 2 * Math.atan(s / 2 / Math.sqrt(f2)) * 180 / Math.PI
+  const n = Math.hypot(h11, h21, h12, h22)               // scale-free weights
+  const d1 = h31 * h32, d2 = h31 * h31 - h32 * h32
+  if (Math.abs(d1) > 1e-12) { const f2 = -(h11 * h12 + h21 * h22) / d1; if (f2 > 0) out.push({fov: toFov(f2), w: Math.abs(d1) * s * s / (n * n) }) }
+  if (Math.abs(d2) > 1e-12) { const f2 = (h12 * h12 + h22 * h22 - h11 * h11 - h21 * h21) / d2; if (f2 > 0) out.push({fov: toFov(f2), w: Math.abs(d2) * s * s / (n * n) }) }
+  return out.filter(e => e.fov > 40 && e.fov < 90)
+}
+
 /**
  * Full frame: blobs -> quads -> pose.
  * @returns {found, blobs, quad, model, center, quat, err}
@@ -393,9 +479,11 @@ export function trackFrame(rgba, w, h, K, models, prevQuat, maxErr = 0.15, cfg =
     if (!best || score > best.score) best = {...s, quad: c.q, score}
   }
   if (!best) return {found: false, blobs}
+  let out = {found: true, blobs, ...best, markScore: 0}
   if (cfg && cfg.markOffset) {
     const {sol, score} = resolveByMark(best, rgba, w, h, K, cfg)
-    return {found: true, blobs, ...sol, quad: best.quad, markScore: score}
+    out = {found: true, blobs, ...sol, quad: best.quad, markScore: score}
   }
-  return {found: true, blobs, ...best, markScore: 0}
+  if (cfg) out = {...out, ...refinePose(out, blobs, K, cfg)}
+  return out
 }

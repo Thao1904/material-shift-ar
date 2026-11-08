@@ -1,6 +1,7 @@
 body.block { margin: 0 !important; position: fixed; inset: 0; }
-#video, #gl, #dbg { position: fixed; inset: 0; width: 100vw; height: 100vh; }
-#video { object-fit: cover; background: #000; }
+#video, #bg, #gl, #dbg { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+#video { object-fit: cover; opacity: 0; pointer-events: none; }   /* kept playing; the canvas below shows its frames */
+#bg { background: #000; z-index: 1; }
 #gl { z-index: 2; touch-action: none; }
 #dbg { z-index: 3; pointer-events: none; }
 
