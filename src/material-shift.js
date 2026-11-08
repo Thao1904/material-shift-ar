@@ -69,7 +69,9 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
     const plain = m.make()
     const clipIn = plain.clone(); clipIn.clippingPlanes = [planeIn]
     const clipOut = plain.clone(); clipOut.clippingPlanes = [planeOut]
-    return {plain, clipIn, clipOut, mix: makeMixMaterial(plain)}
+    const mixIn = makeMixMaterial(plain); mixIn.clippingPlanes = [planeIn]
+    const mixOut = makeMixMaterial(plain); mixOut.clippingPlanes = [planeOut]
+    return {plain, clipIn, clipOut, mix: makeMixMaterial(plain), mixIn, mixOut}
   })
 
   // ---------- mix overlay: another material shows through in noise patches ----------
@@ -111,8 +113,11 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   const meshM = new THREE.Mesh(geo, mats[1].mix)
   meshM.visible = false
   meshM.renderOrder = 1
+  const meshM2 = new THREE.Mesh(geo, mats[1].mixIn)     // overlay of the incoming state during a swipe
+  meshM2.visible = false
+  meshM2.renderOrder = 1
   meshA.castShadow = meshB.castShadow = true
-  root.add(meshA, meshB, meshM)
+  root.add(meshA, meshB, meshM, meshM2)
 
   const axisVec = new THREE.Vector3(sweepAxis === 'x' ? 1 : 0, sweepAxis === 'y' ? 1 : 0, sweepAxis === 'z' ? 1 : 0)
   const ringMat = new THREE.MeshBasicMaterial({color: 0xfff0c2, transparent: true, opacity: 0, side: THREE.DoubleSide,
@@ -145,7 +150,7 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
     box = b
     const old = geo
     geo = makeBoxGeometry(box)
-    meshA.geometry = geo; meshB.geometry = geo; meshM.geometry = geo
+    meshA.geometry = geo; meshB.geometry = geo; meshM.geometry = geo; meshM2.geometry = geo
     freqU.value = 2.8 / Math.max(box.w, box.h, box.d)
     old.dispose()
     root.remove(ring)
@@ -204,10 +209,14 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
     }
     if (holdToCompare && canvas) {
       // a short tap stays free for other uses (placing objects); compare starts after a 280 ms hold
-      let holdT = null
-      const on = () => { clearTimeout(holdT); holdT = setTimeout(() => { comparing = true; $('compare')?.classList.add('on') }, 280) }
+      let holdT = null, holdStart = null
+      const on = () => { clearTimeout(holdT); holdT = setTimeout(() => { if (scrub) return; comparing = true; $('compare')?.classList.add('on') }, 280) }
       const off = () => { clearTimeout(holdT); comparing = false; $('compare')?.classList.remove('on') }
-      canvas.addEventListener('pointerdown', on)
+      cancelHold = off
+      canvas.addEventListener('pointerdown', (e) => { holdStart = [e.clientX, e.clientY]; on() })
+      canvas.addEventListener('pointermove', (e) => {      // moving = swiping, not comparing
+        if (holdStart && Math.hypot(e.clientX - holdStart[0], e.clientY - holdStart[1]) > 10) { clearTimeout(holdT); holdStart = null }
+      })
       canvas.addEventListener('pointerup', off)
       canvas.addEventListener('pointercancel', off)
       canvas.addEventListener('pointerleave', off)
@@ -221,6 +230,65 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   function setSelected(i) { selected = i; syncChips() }
 
   /** Show material j through noise patches on top of the base material (null = off). */
+  // ---------- swipe: screen-space wipe between the shown state and another one ----------
+  // A vertical line follows the finger. On one side of it the block keeps its current look,
+  // on the other side it already shows the next layer. Both sides are clipped by planes that
+  // pass through the camera and the line, so the split stays straight on screen.
+  let scrub = null, cancelHold = () => {}
+  const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _t = new THREE.Vector3()
+  function keepRightOf(x, plane) {
+    const w = canvas.clientWidth || innerWidth, nx = (x / w) * 2 - 1
+    const cam = camera.position
+    _a.set(nx, 1, 0.5).unproject(camera).sub(cam)
+    _b.set(nx, -1, 0.5).unproject(camera).sub(cam)
+    const n = _c.crossVectors(_a, _b).normalize()
+    _t.set(Math.min(1, nx + 0.3), 0, 0.5).unproject(camera).sub(cam)
+    if (n.dot(_t) < 0) n.negate()
+    plane.setFromNormalAndCoplanarPoint(n, cam)
+  }
+  /** Begin a swipe toward `next` = {base, over, ratio}; side = where the next state appears. */
+  function scrubStart(next, side) {
+    finishSweep()
+    cancelHold()
+    scrub = {next, side}
+    meshA.material = mats[current].clipOut
+    if (overlay !== null) meshM.material = mats[overlay].mixOut
+    meshB.material = mats[next.base].clipIn
+    meshB.visible = true
+    if (next.over !== null && next.over !== undefined) {
+      meshM2.material = mats[next.over].mixIn; meshM2.visible = true
+      mixU.value = next.ratio
+    } else meshM2.visible = false
+  }
+  /** Move the split line to screen x (CSS px). */
+  function scrubSet(x) {
+    if (!scrub) return
+    const inPlane = planeIn, outPlane = planeOut
+    keepRightOf(x, inPlane)
+    outPlane.copy(inPlane).negate()
+    if (scrub.side === 'left') { inPlane.negate(); outPlane.negate() }
+  }
+  /** Finish: commit to the next state, or snap back. */
+  function scrubEnd(commit) {
+    if (!scrub) return
+    const n = scrub.next
+    scrub = null
+    if (commit) { current = n.base; overlay = n.over ?? null; if (overlay !== null) mixU.value = n.ratio }
+    meshA.material = mats[current].plain
+    meshB.visible = false; meshM2.visible = false
+    if (overlay !== null) { meshM.material = mats[overlay].mix; meshM.visible = true } else meshM.visible = false
+  }
+  /** Compile every material variant once, so the first swipe does not stutter. */
+  function prewarm() {
+    const g = new THREE.Group()
+    for (const m of mats) for (const k of ['plain', 'clipIn', 'clipOut', 'mix', 'mixIn', 'mixOut']) {
+      const mesh = new THREE.Mesh(geo, m[k]); mesh.frustumCulled = false; g.add(mesh)
+    }
+    scene.add(g)
+    try { renderer.compile(scene, camera) } catch (e) { /* compile lazily instead */ }
+    scene.remove(g)
+  }
+
   function setOverlay(j, ratio = 0.5) {
     overlay = j
     mixU.value = ratio
@@ -367,6 +435,7 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   buildUI()
   setStatus('Point the camera at any face of the block')
   return {updateTargets, updateDirect, setPose, setBox, setStatus, tick, setMaterial, setSelected, setOverlay, toast, root,
+    scrubStart, scrubSet, scrubEnd, prewarm, get scrubbing() { return !!scrub },
     labels: lib.map(m => m.label), get current() { return current }, get selected() { return selected },
     get overlay() { return overlay }, get tracking() { return tracking }}
 }

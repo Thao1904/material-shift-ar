@@ -54,3 +54,11 @@ body.block { margin: 0 !important; position: fixed; inset: 0; }
   background: rgba(12, 14, 15, .55); padding: 6px 12px; border-radius: 999px; }
 .mixrow[hidden] { display: none; }
 .mixrow input { width: 150px; accent-color: #ffd166; }
+
+.swipe-line { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: #fff;
+  box-shadow: 0 0 12px rgba(255, 255, 255, .9), 0 0 2px rgba(0, 0, 0, .5); will-change: transform; }
+.swipe-line[hidden] { display: none; }
+.swipe-label { position: absolute; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 108px); transform: translate(-50%, -6px);
+  font-size: 15px; font-weight: 700; padding: 7px 14px; border-radius: 999px; background: rgba(12, 14, 15, .7);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); opacity: 0; transition: opacity .15s, transform .15s; white-space: nowrap; }
+.swipe-label.on { opacity: 1; transform: translate(-50%, 0); }

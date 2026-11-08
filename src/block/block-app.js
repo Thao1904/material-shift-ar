@@ -33,6 +33,7 @@ const ctrl = createMaterialShift({scene, camera, renderer, canvas: gl, box: {w: 
     ctrl.setSelected(i)
     if (room.code) room.setMaterial(i)
     refreshDisplay(true)
+    renderViews()
   }})
 ctrl.setStatus('Tap Start camera')
 
@@ -70,13 +71,29 @@ function mixSetup() {
   return {base: first.material, over: second.material === first.material ? null : second.material, ratio: latest.mix ?? 0.5}
 }
 
-/** Decide what the block shows: my material, my partner's, or both mixed. */
-let shown = ''
-function refreshDisplay(byMe) {
+/** What a view looks like: {base, over, ratio}. */
+function viewState(mode) {
+  const p = partner()
+  if (!p || mode === 'mine') return {base: myMat, over: null, ratio: mixRatio}
+  if (mode === 'partner') return {base: p.material, over: null, ratio: mixRatio}
+  return mixSetup()
+}
+function viewLabel(mode) {
   const p = partner(), L = ctrl.labels
-  let base = myMat, over = null
-  if (p && viewMode === 'partner') base = p.material
-  if (p && viewMode === 'mix') { const m = mixSetup(); base = m.base; over = m.over; mixRatio = m.ratio }
+  if (!p || mode === 'mine') return `Mine · ${L[myMat]}`
+  if (mode === 'partner') return `${p.name} · ${L[p.material]}`
+  const m = mixSetup()
+  return m.over === null ? `Mix · ${L[m.base]}` : `Mix · ${L[m.base]} + ${L[m.over]}`
+}
+
+/** Decide what the block shows: my material, my partner's, or both mixed. */
+let shown = '', pendingRefresh = false
+function refreshDisplay(byMe) {
+  if (ctrl.scrubbing) { pendingRefresh = true; return }      // a swipe is in progress: apply afterwards
+  const p = partner(), L = ctrl.labels
+  const v = viewState(p ? viewMode : 'mine')
+  const base = v.base, over = v.over
+  if (over !== null) mixRatio = v.ratio
   ctrl.setMaterial(base, true)
   ctrl.setOverlay(over, mixRatio)
   const key = `${base}/${over}`
@@ -287,7 +304,7 @@ function renderViews() {
   $('views').hidden = !p
   if (!p) return
   const seg = $('viewSeg')
-  const items = [['mine', `Mine · ${L[myMat]}`], ['partner', `${p.name} · ${L[p.material]}`], ['mix', 'Mix']]
+  const items = [['mine', `Mine · ${L[myMat]}`], ['mix', 'Mix'], ['partner', `${p.name} · ${L[p.material]}`]]
   seg.innerHTML = ''
   for (const [k, label] of items) {
     const b = document.createElement('button')
@@ -298,16 +315,95 @@ function renderViews() {
     seg.appendChild(b)
   }
   $('mixRow').hidden = viewMode !== 'mix'
+  // the slider always reads "mine ← → partner" on each phone; the shared ratio is the share of
+  // the second (by id) person's material, so phones that are second see it flipped
   const m = mixSetup()
-  $('mixA').textContent = L[m.base]; $('mixB').textContent = m.over === null ? L[m.base] : L[m.over]
-  if (document.activeElement !== $('mixRange')) $('mixRange').value = Math.round(m.ratio * 100)
+  $('mixA').textContent = L[myMat]; $('mixB').textContent = L[p.material]
+  if (document.activeElement !== $('mixRange')) $('mixRange').value = Math.round((iAmFirst() ? m.ratio : 1 - m.ratio) * 100)
 }
+function iAmFirst() { const p = partner(); return !p || room.me.id < p.id }
 let mixSend = null
 $('mixRange').addEventListener('input', () => {
-  mixRatio = $('mixRange').value / 100
+  const v = $('mixRange').value / 100
+  mixRatio = iAmFirst() ? v : 1 - v
   ctrl.setOverlay(ctrl.overlay, mixRatio)
   room.me.mix = mixRatio; room.me.mixAt = Date.now()
   clearTimeout(mixSend); mixSend = setTimeout(() => room.setMix(mixRatio), 120)    // throttle network updates
 })
+// ---------- swipe between layers ----------
+// Mine ← Mix → Partner (alone: swipe through my materials). A line follows the finger and the
+// block shows the next layer on one side of it; release past 1/3 of the screen (or flick) to switch.
+const VIEWS = ['mine', 'mix', 'partner']
+function swipeTarget(dir) {                    // dir +1 = finger moves left (next), -1 = right (previous)
+  const p = partner(), n = ctrl.labels.length
+  if (!p) {
+    const mat = (myMat + dir + n) % n
+    return {state: {base: mat, over: null, ratio: mixRatio}, label: `Mine · ${ctrl.labels[mat]}`, apply: () => chooseMine(mat)}
+  }
+  const i = VIEWS.indexOf(viewMode) + dir
+  if (i < 0 || i >= VIEWS.length) return null
+  const mode = VIEWS[i]
+  return {state: viewState(mode), label: viewLabel(mode), apply: () => { viewMode = mode; renderViews() }}
+}
+function chooseMine(mat) { myMat = mat; ctrl.setSelected(mat); if (room.code) room.setMaterial(mat) }
+
+const line = $('swipeLine'), slabel = $('swipeLabel')
+let g = null, anim = false
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
+gl.addEventListener('pointerdown', (e) => {
+  if (anim) return
+  g = {x0: e.clientX, y0: e.clientY, active: false, hist: [[e.clientX, performance.now()]]}
+})
+gl.addEventListener('pointermove', (e) => {
+  if (!g) return
+  const dx = e.clientX - g.x0, dy = e.clientY - g.y0
+  g.hist.push([e.clientX, performance.now()]); if (g.hist.length > 6) g.hist.shift()
+  if (!g.active) {
+    if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.2) return
+    const dir = dx < 0 ? 1 : -1, target = swipeTarget(dir)
+    if (!target || !ctrl.tracking) { g = null; return }
+    g.active = true; g.dir = dir; g.target = target
+    ctrl.scrubStart(target.state, dir === 1 ? 'right' : 'left')
+    slabel.textContent = target.label; slabel.classList.add('on')
+    line.hidden = false
+    try { gl.setPointerCapture(e.pointerId) } catch (err) { /* not supported */ }
+  }
+  const w = innerWidth
+  g.x = g.dir === 1 ? clamp(w + dx, 0, w) : clamp(dx, 0, w)
+  ctrl.scrubSet(g.x)
+  line.style.transform = `translateX(${g.x}px)`
+})
+function endSwipe() {
+  if (!g) return
+  const s0 = g; g = null
+  if (!s0.active) return
+  const w = innerWidth
+  const [x1, t1] = s0.hist[0], [x2, t2] = s0.hist[s0.hist.length - 1]
+  const v = (x2 - x1) / Math.max(1, t2 - t1)                      // px per ms, negative = moving left
+  const progress = s0.dir === 1 ? (w - s0.x) / w : s0.x / w
+  const commit = progress > 0.33 || v * -s0.dir > 0.5
+  const from = s0.x, to = commit ? (s0.dir === 1 ? 0 : w) : (s0.dir === 1 ? w : 0)
+  const t0 = performance.now(), dur = 220
+  anim = true
+  const step = () => {
+    const k = Math.min(1, (performance.now() - t0) / dur), e = 1 - Math.pow(1 - k, 3)
+    const x = from + (to - from) * e
+    ctrl.scrubSet(x); line.style.transform = `translateX(${x}px)`
+    if (k < 1) return requestAnimationFrame(step)
+    ctrl.scrubEnd(commit)
+    line.hidden = true; slabel.classList.remove('on'); anim = false
+    if (commit) {
+      s0.target.apply()
+      try { navigator.vibrate && navigator.vibrate(15) } catch (err) { /* not supported */ }
+    }
+    pendingRefresh = false
+    refreshDisplay(true); renderViews()
+  }
+  requestAnimationFrame(step)
+}
+gl.addEventListener('pointerup', endSwipe)
+gl.addEventListener('pointercancel', endSwipe)
+
 renderRoomInfo()
+setTimeout(() => ctrl.prewarm(), 1500)
 requestAnimationFrame(loop)

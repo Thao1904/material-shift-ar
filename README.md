@@ -248,6 +248,18 @@ App chỉ tin hướng của khối sau khi đã thấy chấm đen (trạng th�
 3. Cả hai hướng camera vào khối cho tới khi thấy *aligned*.
 4. Mỗi người bấm chọn vật liệu, rồi dùng thanh **Mine / Phone XX / Mix** phía trên.
 
+### Vuốt để chuyển lớp
+
+Thứ tự lớp là **Mine ← Mix → người kia**, lớp chung nằm giữa hai người.
+
+- **Kéo ngang màn hình:** một đường sáng chạy theo ngón tay. Ở một bên đường, khối vẫn là lớp hiện tại. Ở bên kia, khối đã hiện lớp tiếp theo, kèm tên lớp ở phía trên.
+- **Thả tay quá 1/3 màn hình, hoặc vuốt nhanh,** thì chuyển lớp. Thả sớm hơn thì lớp trượt về chỗ cũ.
+- **Giữ yên ngón tay** (không kéo) thì vẫn là xem khối thật như trước.
+- **Khi chỉ có một máy,** vuốt sẽ đổi lần lượt các vật liệu của bạn.
+- Thanh trượt Mix trên máy nào cũng đặt **vật liệu của mình ở bên trái**, kéo về phía vật liệu nào thì vật liệu đó chiếm nhiều hơn. Tỉ lệ vẫn dùng chung cho cả hai máy.
+
+Đường chia được tạo bởi hai mặt phẳng cắt đi qua camera và đường thẳng dưới ngón tay (`scrubStart` / `scrubSet` / `scrubEnd` trong `src/material-shift.js`), nên đường chia luôn thẳng trên màn hình dù khối nghiêng thế nào.
+
 ### Cách hoạt động
 
 - **Mốc chung là chính khối gỗ.** Mỗi máy tự tính vị trí của khối so với camera của nó. Mọi thứ chia sẻ (hoa văn Mix, vị trí điện thoại) đều tính theo toạ độ của khối: đơn vị cm, gốc ở tâm khối, các trục cố định nhờ chấm đen. Vì vậy dù đứng ở góc nào, hai người cũng thấy cùng một chỗ trên khối thật.
