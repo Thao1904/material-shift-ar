@@ -9,7 +9,7 @@
     "markers": "python3 tools/make-markers.py",
     "targets": "node tools/make-targets.mjs",
     "broker": "node tools/broker.mjs",
-    "test": "node tools/test/pose.test.mjs && node tools/test/dots.test.mjs && node tools/test/mark.test.mjs && node tools/test/handheld.test.mjs && node tools/test/pens.test.mjs && node tools/test/stool.test.mjs"
+    "test": "node tools/test/pose.test.mjs && node tools/test/dots.test.mjs && node tools/test/mark.test.mjs && node tools/test/handheld.test.mjs && node tools/test/pens.test.mjs && node tools/test/stool.test.mjs && node tools/test/blocknew.test.mjs && node tools/test/mixfield.test.mjs"
   },
   "dependencies": {
     "mqtt": "^5.16.1",

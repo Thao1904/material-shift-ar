@@ -5,7 +5,7 @@
 //     app rejects poses that jump unless they persist for 3 frames), so it is only reported
 import sharp from 'sharp'
 import {trackFrame, makeModels, intrinsics} from '../../src/block/dots-core.js'
-import {DEFAULT_BLOCK as cfg} from '../../src/block/config.js'
+import {DEFAULT_BLOCK as cfg} from './legacy-cfg.mjs'
 const expect = {p1: 'top', p2: 'top', p3: null, p4: undefined, p5: null}
 let ok = true
 for (const [name, want] of Object.entries(expect)) {

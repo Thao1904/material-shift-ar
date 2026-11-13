@@ -30,6 +30,7 @@
         <div class="topbtns">
           <button class="pill btn" id="tipBtn" type="button" aria-pressed="false">Tip to shift</button>
           <button class="pill btn" id="roomPill" type="button">Room</button>
+          <button class="pill btn" id="rateBtn" type="button" aria-pressed="false" hidden>Rate</button>
           <button class="pill btn" id="calibBtn" type="button">Calibrate</button>
           <button class="pill btn" id="debugBtn" type="button" aria-pressed="false">Debug</button>
         </div>
@@ -39,10 +40,24 @@
       <div class="swipe-label" id="swipeLabel"></div>
       <div class="compare" id="compare">Real block</div>
       <div class="bottom">
-        <p class="help">Swipe sideways to switch layers · hold to see the real block</p>
+        <p class="help" id="help">Swipe sideways to switch layers · hold to see the real block</p>
         <div class="views" id="views" hidden>
           <div class="seg" id="viewSeg"></div>
+          <div class="board" id="board" hidden></div>
           <label class="mixrow" id="mixRow" for="mixRange" hidden><span id="mixA"></span><input type="range" id="mixRange" min="0" max="100" value="50" aria-label="Mix ratio"><span id="mixB"></span></label>
+        </div>
+        <div class="rate" id="rate" hidden>
+          <div class="rate-card" id="rateCard">
+            <span class="stamp like" id="stampLike">LIKE</span>
+            <span class="stamp nope" id="stampNope">NOPE</span>
+            <canvas id="rateSwatch" width="96" height="96"></canvas>
+            <div class="rate-text"><small id="rateCount"></small><b id="rateName"></b><small id="rateTally"></small></div>
+          </div>
+          <div class="rate-btns">
+            <button id="rateNope" type="button" class="round nope" aria-label="Pass">✕</button>
+            <button id="rateClose" type="button" class="done">Done</button>
+            <button id="rateLike" type="button" class="round like" aria-label="Like">♥</button>
+          </div>
         </div>
         <div class="chips" id="chips"></div>
       </div>
@@ -61,7 +76,7 @@
         <p class="calib-note">Open this link on the other phone, or type the code there:</p>
         <code id="roomLink"></code>
         <div class="room-row"><button id="roomCopy" type="button">Copy link</button><button id="roomLeave" type="button">Leave room</button></div>
-        <p class="calib-note">Each person picks a material with the chips. Then switch the view: <b>Mine</b>, the other person's, or <b>Mix</b> (both materials in patches, the same pattern on both phones once each phone has seen the black origin mark).</p>
+        <p class="calib-note">Each person picks a material with the chips. Swipe sideways between <b>Mine</b>, <b>Mix</b> (everyone's materials in patches, the same spots on every phone) and each person's layer. Tap <b>Rate</b> to vote on every material: swipe up = like, swipe down = pass. Then the <b>Votes</b> layer covers the block by popularity: more likes, bigger share.</p>
       </div>
     </div>
 

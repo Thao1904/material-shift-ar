@@ -5,7 +5,7 @@ import sharp from 'sharp'
 import path from 'path'
 import {fileURLToPath} from 'url'
 import {trackFrame, makeModels, intrinsics, projectBlockPoint, markPoint} from '../../src/block/dots-core.js'
-import {DEFAULT_BLOCK as cfg} from '../../src/block/config.js'
+import {DEFAULT_BLOCK as cfg} from './legacy-cfg.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const models = makeModels(cfg)

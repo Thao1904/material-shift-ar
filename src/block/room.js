@@ -3,7 +3,7 @@
 // expressed in BLOCK coordinates (cm, origin = block center, axes fixed by the black mark).
 //
 // Topics (prefix materialshift/v2/<ROOM>/):
-//   user/<id>   retained  {id, name, color, material}      cleared by last-will when the phone leaves
+//   user/<id>   retained  {id, name, color, material, mix, mixAt, votes}      cleared by last-will when the phone leaves
 //   pose/<id>   live      {id, p:[x,y,z], q:[x,y,z,w], t}  camera in block frame, ~5 Hz while aligned
 // The default broker is public: anyone who knows the room code can join.
 import mqtt from 'mqtt/dist/mqtt.esm'
@@ -19,7 +19,7 @@ export function randomCode() {
 
 export function createRoom({broker = DEFAULT_BROKER, onPeers, onStatus}) {
   const id = Math.random().toString(36).slice(2, 8)
-  const me = {id, name: `Phone ${id.slice(0, 2).toUpperCase()}`, color: COLORS[parseInt(id, 36) % COLORS.length], material: 0, mix: 0.5, mixAt: 0}
+  const me = {id, name: `Phone ${id.slice(0, 2).toUpperCase()}`, color: COLORS[parseInt(id, 36) % COLORS.length], material: 0, mix: 0.5, mixAt: 0, votes: {}}   // votes: {materialIndex: 1 like | -1 nope}
   let client = null, code = null
   const peers = new Map()        // id -> {name, color, material, p, q, poseAt}
   const stats = {posesSent: 0, posesGot: 0, log: []}
@@ -59,7 +59,7 @@ export function createRoom({broker = DEFAULT_BROKER, onPeers, onStatus}) {
         if (!txt) { peers.delete(pid); onPeers?.(peers); return }
         try {
           const u = JSON.parse(txt)
-          peers.set(pid, {...(peers.get(pid) || {}), id: pid, name: u.name, color: u.color, material: u.material, mix: u.mix ?? 0.5, mixAt: u.mixAt || 0})
+          peers.set(pid, {...(peers.get(pid) || {}), id: pid, name: u.name, color: u.color, material: u.material, mix: u.mix ?? 0.5, mixAt: u.mixAt || 0, votes: u.votes || {}})
           onPeers?.(peers)
         } catch (e) { /* ignore malformed */ }
       } else if (kind === 'pose') {
@@ -89,6 +89,9 @@ export function createRoom({broker = DEFAULT_BROKER, onPeers, onStatus}) {
   /** Shared mix ratio: the most recent change from any phone wins. */
   function setMix(r) { me.mix = r; me.mixAt = Date.now(); publishMe() }
 
+  /** My ratings, {materialIndex: 1 | -1}; published with the rest of my state. */
+  function setVotes(v) { me.votes = {...v}; publishMe() }
+
   let lastPose = 0
   function publishPose(p, q) {
     const now = Date.now()
@@ -98,6 +101,6 @@ export function createRoom({broker = DEFAULT_BROKER, onPeers, onStatus}) {
     client.publish(topic(`pose/${id}`), JSON.stringify({id, p: p.map(v => +v.toFixed(2)), q: q.map(v => +v.toFixed(4)), t: now}), {qos: 0})
   }
 
-  return {me, join, leave, setMaterial, setMix, publishPose, stats,
+  return {me, join, leave, setMaterial, setMix, setVotes, publishPose, stats,
     get code() { return code }, get peers() { return peers }, get connected() { return !!(client && client.connected) }}
 }

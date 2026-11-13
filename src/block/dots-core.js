@@ -52,7 +52,7 @@ export function findRedBlobs(rgba, w, h) {
     if (Math.max(bw, bh) / Math.min(bw, bh) > 2.8) continue      // lines, stripes
     if (area / (bw * bh) < 0.2) continue                           // very ragged shapes (pen dots can be hollow scribbles)
     if (peak < 55) continue                                         // skin and warm shadows never get this red (measured: skin <= 49, pen dots >= 66)
-    blobs.push({x: sx / area + 0.5, y: sy / area + 0.5, area, w: bw, h: bh})
+    blobs.push({x: sx / area + 0.5, y: sy / area + 0.5, area, w: bw, h: bh, peak})
   }
   return blobs
 }
@@ -122,7 +122,8 @@ export function brightRef(rgba, w, h) {
  */
 export function candidateQuads(blobs, rgba, w, h, maxBlobs = 16) {
   const bright = brightRef(rgba, w, h)
-  const bs = blobs.slice().sort((a, b) => b.area - a.area).slice(0, maxBlobs)
+  // most dot-like first: red, then size
+  const bs = blobs.slice().sort((a, b) => b.peak * Math.sqrt(b.area) - a.peak * Math.sqrt(a.area)).slice(0, maxBlobs)
   const out = []
   const minArea = w * h * 0.002
   for (let a = 0; a < bs.length; a++) for (let b = a + 1; b < bs.length; b++)
@@ -212,10 +213,13 @@ export function poseFromHomography(H) {
 export function makeModels(cfg) {
   const {W, D, T, topInset, sideInsetX, sideInsetY} = cfg
   const rect = (a, b) => [[-a, -b], [a, -b], [a, b], [-a, b]]          // CCW in (u, v)
+  const top = {name: 'top', label: 'Top face', pts: rect(W / 2 - topInset, D / 2 - topInset), depth: T, sym: 4,
+    axes: (u, v, n) => ({X: u, Y: n, Z: scale3(v, -1)})}
+  // with 2 dots per side face only the big faces carry a 4-dot pattern; side dots still refine the pose
+  if (cfg.sideDots === 2) return [top]
   return [
     // big face: u -> block X, v -> block -Z, normal -> block Y, block center is T/2 behind
-    {name: 'top', label: 'Top face', pts: rect(W / 2 - topInset, D / 2 - topInset), depth: T, sym: 4,
-      axes: (u, v, n) => ({X: u, Y: n, Z: scale3(v, -1)})},
+    top,
     // side face (long edge W): u -> X, v -> Y, normal -> Z, center is D/2 behind
     {name: 'side', label: 'Side face', pts: rect(W / 2 - sideInsetX, T / 2 - sideInsetY), depth: D, sym: 2,
       axes: (u, v, n) => ({X: u, Y: v, Z: n})},
@@ -343,6 +347,12 @@ export function allDots(cfg) {
   const a = W / 2 - topInset, b = D / 2 - topInset, sx = W / 2 - sideInsetX, sz = D / 2 - sideInsetX, sy = T / 2 - sideInsetY
   const out = []
   for (const y of [1, -1]) for (const i of [-1, 1]) for (const j of [-1, 1]) out.push({p: [i * a, y * T / 2, j * b], n: [0, y, 0]})
+  if (cfg.sideDots === 2) {                    // 2 dots per side face, centered across the thickness
+    const ex = W / 2 - cfg.sideEnd, ez = D / 2 - cfg.sideEnd
+    for (const z of [1, -1]) for (const i of [-1, 1]) out.push({p: [i * ex, 0, z * D / 2], n: [0, 0, z]})
+    for (const x of [1, -1]) for (const i of [-1, 1]) out.push({p: [x * W / 2, 0, i * ez], n: [x, 0, 0]})
+    return out
+  }
   for (const z of [1, -1]) for (const i of [-1, 1]) for (const j of [-1, 1]) out.push({p: [i * sx, j * sy, z * D / 2], n: [0, 0, z]})
   for (const x of [1, -1]) for (const i of [-1, 1]) for (const j of [-1, 1]) out.push({p: [x * W / 2, j * sy, i * sz], n: [x, 0, 0]})
   return out

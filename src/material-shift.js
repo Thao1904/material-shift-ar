@@ -6,6 +6,7 @@ import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js'
 import {RoundedBoxGeometry} from 'three/addons/geometries/RoundedBoxGeometry.js'
 import {FACES, FACE_BY_TARGET, MARKER_W, MARKER_H, cubePoseFromFace} from './faces.js'
 import {createMaterialLibrary} from './materials.js'
+import {buildMixField} from './mix-noise.js'
 
 const COVER = 1.03            // virtual cube slightly larger than the paper cube to hide its edges
 const LOST_GRACE_MS = 350     // keep showing the cube briefly when tracking drops
@@ -69,43 +70,45 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
 
   // ---------- materials: plain + two clipped variants for the sweep ----------
   const lib = createMaterialLibrary(colors)
+  // ---------- mix layers: up to 3 other materials show through bands of a shared field ----------
+  // The field (mix-noise.js) lives in BLOCK coordinates, is the same on every phone and is
+  // symmetric, so the patches sit on the same spots of the real block for everyone.
+  // Slot k of a state shows material m where lo <= field < hi. Set A = what is shown,
+  // set B = the incoming state while a swipe is in progress.
+  const MAX_BANDS = 3
+  let field = buildMixField(box, {extent: cover})
+  const texU = {value: field.texture}, extU = {value: new THREE.Vector3(field.extent.x, field.extent.y, field.extent.z)}
+  const slot = () => ({lo: {value: 0}, hi: {value: 0}})
+  const slotsA = Array.from({length: MAX_BANDS}, slot), slotsB = Array.from({length: MAX_BANDS}, slot)
+  function makeBandMaterial(plain, s, clip) {
+    const m = plain.clone()
+    if (clip) m.clippingPlanes = [clip]
+    m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -4
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.uMsTex = texU; sh.uniforms.uMsExt = extU; sh.uniforms.uLo = s.lo; sh.uniforms.uHi = s.hi
+      sh.vertexShader = 'varying vec3 vMsLocal;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vMsLocal = position;')
+      sh.fragmentShader = `uniform highp sampler3D uMsTex; uniform vec3 uMsExt; uniform float uLo; uniform float uHi; varying vec3 vMsLocal;
+      ` + sh.fragmentShader
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+          float msVal = texture(uMsTex, clamp(vMsLocal / uMsExt + 0.5, 0.0, 1.0)).r;
+          if (msVal < uLo || msVal >= uHi) discard;
+          float msEdge = min(uLo <= 0.0 ? 1.0 : msVal - uLo, uHi >= 1.0 ? 1.0 : uHi - msVal);`)
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          diffuseColor.rgb *= mix(0.55, 1.0, smoothstep(0.0, 0.025, msEdge));   // thin inlay seam`)
+    }
+    m.customProgramCacheKey = () => 'ms-band'
+    return m
+  }
   const planeIn = new THREE.Plane(), planeOut = new THREE.Plane()
   const mats = lib.map((m) => {
     const plain = m.make()
     const clipIn = plain.clone(); clipIn.clippingPlanes = [planeIn]
     const clipOut = plain.clone(); clipOut.clippingPlanes = [planeOut]
-    const mixIn = makeMixMaterial(plain); mixIn.clippingPlanes = [planeIn]
-    const mixOut = makeMixMaterial(plain); mixOut.clippingPlanes = [planeOut]
-    return {plain, clipIn, clipOut, mix: makeMixMaterial(plain), mixIn, mixOut}
+    return {plain, clipIn, clipOut,
+      band: slotsA.map(s => makeBandMaterial(plain, s, null)),
+      bandOut: slotsA.map(s => makeBandMaterial(plain, s, planeOut)),
+      bandIn: slotsB.map(s => makeBandMaterial(plain, s, planeIn))}
   })
-
-  // ---------- mix overlay: another material shows through in noise patches ----------
-  // The noise is evaluated in BLOCK coordinates, so two phones aligned on the same block
-  // see the same patches on the same spots of the real block.
-  const mixU = {value: 0.5}, freqU = {value: 2.8 / Math.max(box.w, box.h, box.d)}
-  function makeMixMaterial(plain) {
-    const m = plain.clone()
-    m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -4
-    m.onBeforeCompile = (sh) => {
-      sh.uniforms.uMix = mixU; sh.uniforms.uFreq = freqU
-      sh.vertexShader = 'varying vec3 vMsLocal;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vMsLocal = position;')
-      sh.fragmentShader = `uniform float uMix; uniform float uFreq; varying vec3 vMsLocal;
-        float msH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-        float msN(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
-          return mix(mix(mix(msH(i), msH(i + vec3(1,0,0)), f.x), mix(msH(i + vec3(0,1,0)), msH(i + vec3(1,1,0)), f.x), f.y),
-                     mix(mix(msH(i + vec3(0,0,1)), msH(i + vec3(1,0,1)), f.x), mix(msH(i + vec3(0,1,1)), msH(i + vec3(1,1,1)), f.x), f.y), f.z); }
-        float msF(vec3 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * msN(p); p *= 2.03; a *= 0.5; } return s; }
-      ` + sh.fragmentShader
-        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
-          float msVal = msF(vMsLocal * uFreq + 3.7);
-          float msThr = mix(0.2, 0.76, uMix);
-          if (msVal > msThr) discard;`)
-        .replace('#include <map_fragment>', `#include <map_fragment>
-          diffuseColor.rgb *= mix(0.55, 1.0, smoothstep(0.0, 0.02, msThr - msVal));   // thin inlay seam`)
-    }
-    m.customProgramCacheKey = () => 'ms-mix'
-    return m
-  }
 
   // ---------- cube ----------
   const root = new THREE.Group()
@@ -115,14 +118,11 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   const meshA = new THREE.Mesh(geo, mats[0].plain)
   const meshB = new THREE.Mesh(geo, mats[0].clipIn)
   meshB.visible = false
-  const meshM = new THREE.Mesh(geo, mats[1].mix)
-  meshM.visible = false
-  meshM.renderOrder = 1
-  const meshM2 = new THREE.Mesh(geo, mats[1].mixIn)     // overlay of the incoming state during a swipe
-  meshM2.visible = false
-  meshM2.renderOrder = 1
+  const bandMesh = (k) => { const m = new THREE.Mesh(geo, mats[0].band[k]); m.visible = false; m.renderOrder = 1; return m }
+  const overA = Array.from({length: MAX_BANDS}, (_, k) => bandMesh(k))      // bands of the shown state
+  const overB = Array.from({length: MAX_BANDS}, (_, k) => bandMesh(k))      // bands of the incoming state (swipe)
   meshA.castShadow = meshB.castShadow = true
-  root.add(meshA, meshB, meshM, meshM2)
+  root.add(meshA, meshB, ...overA, ...overB)
 
   const axisVec = new THREE.Vector3(sweepAxis === 'x' ? 1 : 0, sweepAxis === 'y' ? 1 : 0, sweepAxis === 'z' ? 1 : 0)
   const ringMat = new THREE.MeshBasicMaterial({color: 0xfff0c2, transparent: true, opacity: 0, side: THREE.DoubleSide,
@@ -155,8 +155,11 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
     if (b.type === 'capsule') { shape = b; box = {w: 2 * b.r, h: b.len, d: 2 * b.r} } else box = b
     const old = geo
     geo = makeGeo()
-    meshA.geometry = geo; meshB.geometry = geo; meshM.geometry = geo; meshM2.geometry = geo
-    freqU.value = 2.8 / Math.max(box.w, box.h, box.d)
+    for (const m of [meshA, meshB, ...overA, ...overB]) m.geometry = geo
+    const oldField = field
+    field = buildMixField(box, {extent: cover})
+    texU.value = field.texture; extU.value.set(field.extent.x, field.extent.y, field.extent.z)
+    oldField.texture.dispose()
     old.dispose()
     root.remove(ring)
     ring = makeSweepFrame(box, sweepAxis, ringMat); ring.renderOrder = 3
@@ -165,7 +168,7 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
   }
 
   // ---------- state ----------
-  let current = 0, selected = 0, overlay = null, sweep = null
+  let current = 0, selected = 0, bands = [], sweep = null
   let tracking = false, lastSeen = -1e9, popT = 0, bestName = null
   let comparing = false, tipMode = false
   let tipCandidate = null, tipSince = 0, tipCommitted = null
@@ -251,19 +254,26 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
     if (n.dot(_t) < 0) n.negate()
     plane.setFromNormalAndCoplanarPoint(n, cam)
   }
-  /** Begin a swipe toward `next` = {base, over, ratio}; side = where the next state appears. */
+  /** Show `list` = [{m, lo, hi}] on a set of band meshes. */
+  function showBands(meshes, slots, list, variant) {
+    for (let k = 0; k < MAX_BANDS; k++) {
+      const b = list[k], mesh = meshes[k]
+      if (!b || b.hi - b.lo < 1e-4) { mesh.visible = false; continue }
+      slots[k].lo.value = b.lo; slots[k].hi.value = b.hi
+      mesh.material = mats[b.m][variant][k]
+      mesh.visible = true
+    }
+  }
+  /** Begin a swipe toward `next` = {base, bands}; side = where the next state appears. */
   function scrubStart(next, side) {
     finishSweep()
     cancelHold()
     scrub = {next, side}
     meshA.material = mats[current].clipOut
-    if (overlay !== null) meshM.material = mats[overlay].mixOut
+    showBands(overA, slotsA, bands, 'bandOut')
     meshB.material = mats[next.base].clipIn
     meshB.visible = true
-    if (next.over !== null && next.over !== undefined) {
-      meshM2.material = mats[next.over].mixIn; meshM2.visible = true
-      mixU.value = next.ratio
-    } else meshM2.visible = false
+    showBands(overB, slotsB, next.bands || [], 'bandIn')
   }
   /** Move the split line to screen x (CSS px). */
   function scrubSet(x) {
@@ -278,29 +288,30 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
     if (!scrub) return
     const n = scrub.next
     scrub = null
-    if (commit) { current = n.base; overlay = n.over ?? null; if (overlay !== null) mixU.value = n.ratio }
+    if (commit) { current = n.base; bands = (n.bands || []).slice(0, MAX_BANDS) }
     meshA.material = mats[current].plain
-    meshB.visible = false; meshM2.visible = false
-    if (overlay !== null) { meshM.material = mats[overlay].mix; meshM.visible = true } else meshM.visible = false
+    meshB.visible = false
+    showBands(overB, slotsB, [], 'bandIn')
+    showBands(overA, slotsA, bands, 'band')
   }
   /** Compile every material variant once, so the first swipe does not stutter. */
   function prewarm() {
     const g = new THREE.Group()
-    for (const m of mats) for (const k of ['plain', 'clipIn', 'clipOut', 'mix', 'mixIn', 'mixOut']) {
-      const mesh = new THREE.Mesh(geo, m[k]); mesh.frustumCulled = false; g.add(mesh)
+    for (const m of mats) for (const k of ['plain', 'clipIn', 'clipOut', 'band', 'bandIn', 'bandOut']) {
+      for (const mat of [].concat(m[k]).slice(0, 1)) { const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; g.add(mesh) }
     }
     scene.add(g)
     try { renderer.compile(scene, camera) } catch (e) { /* compile lazily instead */ }
     scene.remove(g)
   }
 
-  function setOverlay(j, ratio = 0.5) {
-    overlay = j
-    mixU.value = ratio
-    if (j === null || j === undefined) { meshM.visible = false; return }
-    meshM.material = mats[j].mix
-    meshM.visible = true
+  /** Bands of other materials over the base: [{m, lo, hi}] in field units (0..1 = share of the surface). */
+  function setBands(list) {
+    bands = (list || []).slice(0, MAX_BANDS)
+    if (!scrub) showBands(overA, slotsA, bands, 'band')
   }
+  /** Two-material shortcut: material j over `ratio` of the block (null = off). */
+  function setOverlay(j, ratio = 0.5) { setBands(j === null || j === undefined ? [] : [{m: j, lo: 0, hi: ratio}]) }
 
   // ---------- material switching ----------
   function finishSweep() {
@@ -443,8 +454,8 @@ export function createMaterialShift({scene, camera, renderer, canvas, holdToComp
 
   buildUI()
   setStatus('Point the camera at any face of the block')
-  return {updateTargets, updateDirect, setPose, setBox, setStatus, tick, setMaterial, setSelected, setOverlay, toast, root,
+  return {updateTargets, updateDirect, setPose, setBox, setStatus, tick, setMaterial, setSelected, setOverlay, toast, root, setBands,
     scrubStart, scrubSet, scrubEnd, prewarm, get scrubbing() { return !!scrub },
     labels: lib.map(m => m.label), get current() { return current }, get selected() { return selected },
-    get overlay() { return overlay }, get tracking() { return tracking }}
+    get bands() { return bands }, get overlay() { return bands.length ? bands[0].m : null }, get field() { return field }, get tracking() { return tracking }}
 }

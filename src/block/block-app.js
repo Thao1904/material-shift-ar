@@ -1,4 +1,4 @@
-// Material Shift for the white wooden block with 4 red dots on each face.
+// Material Shift for the white wooden block: 4 red dots on each big face, 2 on each side face.
 // Camera (getUserMedia) -> red-dot tracker (dots-core.js) -> three.js materials.
 import * as THREE from 'three'
 import {createMaterialShift} from '../material-shift.js'
@@ -6,6 +6,7 @@ import {trackFrame, makeModels, intrinsics, fovFromSquare} from './dots-core.js'
 import {DEFAULT_BLOCK} from './config.js'
 import {createRoom, randomCode, DEFAULT_BROKER} from './room.js'
 import {createCommonLayer} from './common-layer.js'
+import {layersFromWeights} from '../mix-noise.js'
 
 const $ = id => document.getElementById(id)
 const STORE = 'material-shift-block-v2'
@@ -27,6 +28,8 @@ const scene = new THREE.Scene()
 const camera = new THREE.PerspectiveCamera()        // stays at the origin; projection comes from the camera intrinsics
 // My own material choice (the chips) is separate from what is displayed (mine / partner's / mix).
 let myMat = 0, viewMode = 'mine', mixRatio = 0.5
+// Rating: my votes {materialIndex: 1 like | -1 nope}; rate mode shows one candidate material at a time.
+let rateMode = false, rateIdx = 0, anim = false
 const ctrl = createMaterialShift({scene, camera, renderer, canvas: gl, box: {w: cfg.W, h: cfg.T, d: cfg.D}, sweepAxis: 'x', cover: 1.012,
   onChip: (i) => {
     myMat = i
@@ -43,7 +46,7 @@ const room = createRoom({
   broker: params.get('broker') || DEFAULT_BROKER,
   onPeers: (map, poseOnly) => {
     layer.setPeers(map, ctrl.labels)
-    if (!poseOnly) { refreshDisplay(false); renderRoomInfo(); renderViews() }
+    if (!poseOnly) { refreshDisplay(false); renderRoomInfo(); renderViews(); if (rateMode && !anim) showCandidate() }
   },
   onStatus: (s, code, msg) => { roomStatus = s; renderRoomInfo(msg) },
 })
@@ -51,56 +54,105 @@ let roomStatus = 'idle'
 const layer = createCommonLayer({scene, camera, ctrl})
 window.__room = room; window.__ms = ctrl
 
-/** The first other phone in the room (rooms are meant for two people). */
+/** Everyone in the room, me included, ordered by id (the same order on every phone). */
+function people() {
+  const me = {...room.me, material: myMat}
+  return [me, ...room.peers.values()].sort((x, y) => (x.id < y.id ? -1 : 1))
+}
+/** The first other phone (the mix slider is for rooms of two). */
 function partner() {
   const ids = [...room.peers.keys()].sort()
   return ids.length ? room.peers.get(ids[0]) : null
 }
+function iAmFirst() { const p = partner(); return !p || room.me.id < p.id }
 
 /**
- * The mixed common layer must look the same on every phone, so it does not depend on who
- * is looking: the two people are ordered by id (first = base, second = patches), and the
- * patch ratio is shared (latest slider change wins).
+ * The mixed common layer must look the same on every phone, so it never depends on who is
+ * looking. Two people: the shared ratio (latest slider change wins) is the share of the
+ * second person (by id). More people: everyone's material gets an equal share.
  */
 function mixSetup() {
-  const p = partner()
-  if (!p) return null
-  const a = {id: room.me.id, material: myMat, mix: room.me.mix, mixAt: room.me.mixAt}
-  const [first, second] = [a, p].sort((x, y) => (x.id < y.id ? -1 : 1))
-  const latest = a.mixAt >= (p.mixAt || 0) ? a : p
-  return {base: first.material, over: second.material === first.material ? null : second.material, ratio: latest.mix ?? 0.5}
+  const all = people()
+  if (all.length < 2) return {base: myMat, bands: []}
+  const w = new Map(), add = (m, v) => w.set(m, (w.get(m) || 0) + v)
+  if (all.length === 2) {
+    const latest = all.reduce((a, b) => ((b.mixAt || 0) > (a.mixAt || 0) ? b : a))
+    const r = latest.mixAt ? latest.mix ?? 0.5 : 0.5
+    add(all[0].material, 1 - r); add(all[1].material, r)
+  } else for (const u of all) add(u.material, 1)
+  return layersFromWeights(w, myMat)
 }
 
-/** What a view looks like: {base, over, ratio}. */
+/** Likes and nopes per material, over everyone in the room. */
+function tally() {
+  const n = ctrl.labels.length, t = Array.from({length: n}, () => ({like: 0, nope: 0}))
+  for (const u of people()) for (const [k, v] of Object.entries(u.votes || {})) {
+    const i = +k; if (!t[i]) continue
+    if (v > 0) t[i].like++; else if (v < 0) t[i].nope++
+  }
+  return t
+}
+function anyVotes() { return tally().some(x => x.like || x.nope) }
+/** Votes layer: a material's share of the block grows with its likes (a nope counts half against). */
+function voteShares() {
+  const t = tally(), score = t.map(x => Math.max(0, x.like - 0.5 * x.nope))
+  const total = score.reduce((a, b) => a + b, 0)
+  return score.map(v => (total ? v / total : 0))
+}
+function votesSetup() {
+  const sh = voteShares(), w = new Map()
+  sh.forEach((v, i) => { if (v > 0) w.set(i, v) })
+  return layersFromWeights(w, myMat)
+}
+
+/** The views one can swipe through, in order. */
+function availableViews() {
+  const v = ['mine']
+  if (room.peers.size) { v.push('mix'); for (const id of [...room.peers.keys()].sort()) v.push(`peer:${id}`) }
+  if (anyVotes()) v.push('votes')
+  return v
+}
+function peerOf(mode) { return mode.startsWith('peer:') ? room.peers.get(mode.slice(5)) : null }
+
+/** What a view looks like: {base, bands}. */
 function viewState(mode) {
-  const p = partner()
-  if (!p || mode === 'mine') return {base: myMat, over: null, ratio: mixRatio}
-  if (mode === 'partner') return {base: p.material, over: null, ratio: mixRatio}
-  return mixSetup()
+  if (mode === 'mix') return mixSetup()
+  if (mode === 'votes') return votesSetup()
+  const p = peerOf(mode)
+  if (p) return {base: p.material, bands: []}
+  return {base: myMat, bands: []}
+}
+const pct = v => `${Math.round(v * 100)}%`
+function describe(st) {
+  const L = ctrl.labels
+  if (!st.bands.length) return L[st.base]
+  const parts = st.bands.map(b => [b.m, b.hi - b.lo])
+  parts.push([st.base, 1 - st.bands.reduce((a, b) => a + b.hi - b.lo, 0)])
+  return parts.sort((a, b) => b[1] - a[1]).map(([m, v]) => `${L[m]} ${pct(v)}`).join(' · ')
 }
 function viewLabel(mode) {
-  const p = partner(), L = ctrl.labels
-  if (!p || mode === 'mine') return `Mine · ${L[myMat]}`
-  if (mode === 'partner') return `${p.name} · ${L[p.material]}`
-  const m = mixSetup()
-  return m.over === null ? `Mix · ${L[m.base]}` : `Mix · ${L[m.base]} + ${L[m.over]}`
+  const st = viewState(mode)
+  if (mode === 'mix') return `Mix · ${describe(st)}`
+  if (mode === 'votes') return `Votes · ${describe(st)}`
+  const p = peerOf(mode)
+  if (p) return `${p.name} · ${ctrl.labels[p.material]}`
+  return `Mine · ${ctrl.labels[myMat]}`
 }
 
-/** Decide what the block shows: my material, my partner's, or both mixed. */
+/** Decide what the block shows. */
 let shown = '', pendingRefresh = false
 function refreshDisplay(byMe) {
-  if (ctrl.scrubbing) { pendingRefresh = true; return }      // a swipe is in progress: apply afterwards
-  const p = partner(), L = ctrl.labels
-  const v = viewState(p ? viewMode : 'mine')
-  const base = v.base, over = v.over
-  if (over !== null) mixRatio = v.ratio
-  ctrl.setMaterial(base, true)
-  ctrl.setOverlay(over, mixRatio)
-  const key = `${base}/${over}`
+  if (ctrl.scrubbing || anim) { pendingRefresh = true; return }      // a swipe is in progress: apply afterwards
+  if (!availableViews().includes(viewMode)) viewMode = 'mine'
+  const st = rateMode ? {base: rateIdx, bands: []} : viewState(viewMode)
+  ctrl.setMaterial(st.base, true)
+  ctrl.setBands(st.bands)
+  const key = JSON.stringify(st)
   if (key !== shown) {
+    const structural = shown.split('"bands"')[0] !== key.split('"bands"')[0] || !shown
     shown = key
-    ctrl.toast(over === null ? L[base] : `${L[base]} + ${L[over]}`)
-    if (!byMe && p) try { navigator.vibrate && navigator.vibrate(12) } catch (e) { /* not supported */ }
+    if (!rateMode && (structural || byMe)) ctrl.toast(describe(st))
+    if (!byMe && room.peers.size) try { navigator.vibrate && navigator.vibrate(12) } catch (e) { /* not supported */ }
   }
 }
 // alignment: the block frame is only trusted after the black origin mark has been seen
@@ -201,7 +253,7 @@ function loop() {
       quat.set(...r.quat)
       quat.premultiply(FLIP)
       feedFov(r)
-      let label = room.code ? `${r.model.label} · ${aligned ? 'aligned' : 'show the black mark'}` : r.model.label
+      let label = r.model.label
       if (!cfg.fovCalibrated) label += ` · calibrating camera ${Math.min(99, Math.round(fovSamples.length / FOV_NEEDED * 100))}%, tilt slowly`
       ctrl.updateDirect(true, pos, quat, label, now)
     } else {
@@ -278,8 +330,7 @@ const FIELDS = [
   ['D', 'Depth (cm)', 'other edge of the big face'],
   ['T', 'Thickness (cm)', ''],
   ['topInset', 'Big face: dot to edge (cm)', 'center of a dot to the nearest edge'],
-  ['sideInsetX', 'Side face: dot to short edge (cm)', ''],
-  ['sideInsetY', 'Side face: dot to long edge (cm)', ''],
+  ['sideEnd', 'Side face: dot to the end (cm)', '2 dots per side face, centered across the thickness'],
   ['markOffset', 'Black mark: offset (cm)', 'from its red dot toward the center, along each edge'],
   ['fov', 'Camera FOV (°)', 'raise if the overlay looks too big, lower if too small'],
 ]
@@ -343,93 +394,197 @@ $('roomClose').onclick = () => { $('room').hidden = true }
 $('roomCreate').onclick = () => joinRoom(randomCode())
 $('roomJoin').onclick = () => { const c = $('roomInput').value.trim(); if (c) joinRoom(c) }
 $('roomInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('roomJoin').click() })
-$('roomLeave').onclick = () => { room.leave(); viewMode = 'mine'; refreshDisplay(true); renderRoomInfo(); renderViews() }
+$('roomLeave').onclick = () => { room.leave(); viewMode = 'mine'; if (rateMode) setRateMode(false); refreshDisplay(true); renderRoomInfo(); renderViews() }
 $('roomCopy').onclick = async () => {
   try { await navigator.clipboard.writeText($('roomLink').textContent); $('roomCopy').textContent = 'Copied' }
   catch (e) { const r = document.createRange(); r.selectNodeContents($('roomLink')); getSelection().removeAllRanges(); getSelection().addRange(r) }
   setTimeout(() => { $('roomCopy').textContent = 'Copy link' }, 1500)
 }
-// ---------- view switch: Mine / Partner / Mix ----------
+// ---------- view switch: Mine / Mix / each person / Votes ----------
 function renderViews() {
-  const p = partner(), L = ctrl.labels
-  $('views').hidden = !p
-  if (!p) return
+  const L = ctrl.labels, views = availableViews()
+  $('views').hidden = views.length < 2 || rateMode
+  $('rateBtn').hidden = !room.code
+  if (views.length < 2) return
   const seg = $('viewSeg')
-  const items = [['mine', `Mine · ${L[myMat]}`], ['mix', 'Mix'], ['partner', `${p.name} · ${L[p.material]}`]]
   seg.innerHTML = ''
-  for (const [k, label] of items) {
-    const b = document.createElement('button')
-    b.type = 'button'; b.id = `view-${k}`; b.textContent = label
+  for (const k of views) {
+    const b = document.createElement('button'), p = peerOf(k)
+    b.type = 'button'; b.id = `view-${k.replace(':', '-')}`
+    b.textContent = k === 'mine' ? `Mine · ${L[myMat]}` : k === 'mix' ? 'Mix' : k === 'votes' ? 'Votes' : `${p.name} · ${L[p.material]}`
+    if (p) { b.className = 'peer'; b.style.setProperty('--dot', p.color) }
     b.setAttribute('aria-pressed', viewMode === k)
-    if (k === 'partner') b.style.setProperty('--dot', p.color)
     b.onclick = () => { viewMode = k; refreshDisplay(true); renderViews() }
     seg.appendChild(b)
   }
-  $('mixRow').hidden = viewMode !== 'mix'
-  // the slider always reads "mine ← → partner" on each phone; the shared ratio is the share of
-  // the second (by id) person's material, so phones that are second see it flipped
-  const m = mixSetup()
-  $('mixA').textContent = L[myMat]; $('mixB').textContent = L[p.material]
-  if (document.activeElement !== $('mixRange')) $('mixRange').value = Math.round((iAmFirst() ? m.ratio : 1 - m.ratio) * 100)
+  // the slider (rooms of two) always reads "mine ← → partner"; the shared ratio is the share of
+  // the second person by id, so the phone that is second sees it flipped
+  const p = partner()
+  $('mixRow').hidden = !(viewMode === 'mix' && room.peers.size === 1)
+  if (p && room.peers.size === 1) {
+    $('mixA').textContent = L[myMat]; $('mixB').textContent = L[p.material]
+    const all = people(), latest = all.reduce((x, y) => ((y.mixAt || 0) > (x.mixAt || 0) ? y : x))
+    const r = latest.mixAt ? latest.mix ?? 0.5 : 0.5
+    if (document.activeElement !== $('mixRange')) $('mixRange').value = Math.round((iAmFirst() ? r : 1 - r) * 100)
+  }
+  renderBoard()
 }
-function iAmFirst() { const p = partner(); return !p || room.me.id < p.id }
+/** Leaderboard under the Votes view: share of the block, likes, nopes. */
+function renderBoard() {
+  const board = $('board')
+  board.hidden = viewMode !== 'votes' || rateMode
+  if (board.hidden) return
+  const t = tally(), sh = voteShares(), L = ctrl.labels
+  const rows = L.map((label, i) => ({i, label, s: sh[i], ...t[i]})).sort((a, b) => b.s - a.s || b.like - a.like)
+  board.innerHTML = rows.map(r => `<div class="brow"><span class="bname">${r.label}</span><span class="bbar"><i style="width:${(r.s * 100).toFixed(1)}%"></i></span><span class="bpct">${pct(r.s)}</span><span class="bvotes">♥ ${r.like} · ✕ ${r.nope}</span></div>`).join('')
+}
 let mixSend = null
 $('mixRange').addEventListener('input', () => {
   const v = $('mixRange').value / 100
   mixRatio = iAmFirst() ? v : 1 - v
-  ctrl.setOverlay(ctrl.overlay, mixRatio)
   room.me.mix = mixRatio; room.me.mixAt = Date.now()
+  ctrl.setBands(mixSetup().bands)
   clearTimeout(mixSend); mixSend = setTimeout(() => room.setMix(mixRatio), 120)    // throttle network updates
 })
+
+// ---------- rating (dating-app style): swipe up = like, swipe down = nope ----------
+const swatchOf = i => $('chips').children[i]?.querySelector('canvas')
+function nextUnrated(from) {
+  const n = ctrl.labels.length, v = room.me.votes || {}
+  for (let k = 1; k <= n; k++) { const i = (from + k) % n; if (!(i in v)) return i }
+  return -1
+}
+function setRateMode(on) {
+  rateMode = on
+  $('rateBtn').setAttribute('aria-pressed', on)
+  $('rate').hidden = !on
+  $('chips').hidden = on
+  if (on) {
+    const v = room.me.votes || {}
+    rateIdx = !(myMat in v) ? myMat : Math.max(0, nextUnrated(myMat))
+    showCandidate()
+  } else ctrl.setStatus('Tracking', ctrl.tracking)
+  $('help').textContent = on ? 'Swipe up to like · down to pass · sideways to browse' : 'Swipe sideways to switch layers · hold to see the real block'
+  refreshDisplay(true); renderViews()
+}
+function showCandidate() {
+  const L = ctrl.labels, t = tally()[rateIdx], mine = (room.me.votes || {})[rateIdx]
+  $('rateName').textContent = L[rateIdx]
+  $('rateTally').textContent = `${mine > 0 ? 'You liked it · ' : mine < 0 ? 'You passed · ' : ''}♥ ${t.like} · ✕ ${t.nope} in the room`
+  const c = $('rateSwatch').getContext('2d'), src = swatchOf(rateIdx)
+  c.clearRect(0, 0, 96, 96); if (src) c.drawImage(src, 0, 0, 96, 96)
+  const done = Object.keys(room.me.votes || {}).length
+  $('rateCount').textContent = `${Math.min(done + 1, L.length)} / ${L.length}`
+  cardTo(0, 0, false)
+  refreshDisplay(true)
+}
+function cardTo(dy, dx, animate) {
+  const card = $('rateCard')
+  card.style.transition = animate ? 'transform .22s ease-out, opacity .22s' : 'none'
+  card.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx * 0.04 - dy * 0.03}deg)`
+  const k = Math.min(1, Math.abs(dy) / 110)
+  $('stampLike').style.opacity = dy < 0 ? k : 0
+  $('stampNope').style.opacity = dy > 0 ? k : 0
+}
+function vote(v) {
+  const votes = {...(room.me.votes || {}), [rateIdx]: v}
+  room.me.votes = votes
+  if (room.code) room.setVotes(votes)
+  try { navigator.vibrate && navigator.vibrate(v > 0 ? [12, 40, 12] : 20) } catch (e) { /* not supported */ }
+  ctrl.toast(`${v > 0 ? '♥' : '✕'} ${ctrl.labels[rateIdx]}`)
+  cardTo(v > 0 ? -innerHeight * 0.6 : innerHeight * 0.6, 0, true)
+  $('rateCard').style.opacity = 0
+  anim = true
+  setTimeout(() => {
+    anim = false
+    $('rateCard').style.opacity = 1
+    const nx = nextUnrated(rateIdx)
+    if (nx < 0) {                                      // everything rated: show the room's verdict
+      setRateMode(false)
+      viewMode = 'votes'; refreshDisplay(true); renderViews()
+      ctrl.toast(`Votes · ${describe(votesSetup())}`)
+      return
+    }
+    rateIdx = nx; showCandidate()
+  }, 230)
+}
+function browse(dir) {
+  const n = ctrl.labels.length
+  rateIdx = (rateIdx + dir + n) % n
+  showCandidate()
+  try { navigator.vibrate && navigator.vibrate(8) } catch (e) { /* not supported */ }
+}
+$('rateBtn').onclick = () => setRateMode(!rateMode)
+$('rateLike').onclick = () => !anim && vote(1)
+$('rateNope').onclick = () => !anim && vote(-1)
+$('rateClose').onclick = () => setRateMode(false)
+
 // ---------- swipe between layers ----------
-// Mine ← Mix → Partner (alone: swipe through my materials). A line follows the finger and the
-// block shows the next layer on one side of it; release past 1/3 of the screen (or flick) to switch.
-const VIEWS = ['mine', 'mix', 'partner']
+// Views in order (Mine · Mix · each person · Votes; alone: my materials). A line follows the
+// finger and the block shows the next layer on one side of it; release past 1/3 (or flick) to switch.
 function swipeTarget(dir) {                    // dir +1 = finger moves left (next), -1 = right (previous)
-  const p = partner(), n = ctrl.labels.length
-  if (!p) {
+  const views = availableViews(), n = ctrl.labels.length
+  if (views.length < 2) {
     const mat = (myMat + dir + n) % n
-    return {state: {base: mat, over: null, ratio: mixRatio}, label: `Mine · ${ctrl.labels[mat]}`, apply: () => chooseMine(mat)}
+    return {state: {base: mat, bands: []}, label: `Mine · ${ctrl.labels[mat]}`, apply: () => chooseMine(mat)}
   }
-  const i = VIEWS.indexOf(viewMode) + dir
-  if (i < 0 || i >= VIEWS.length) return null
-  const mode = VIEWS[i]
+  const i = views.indexOf(viewMode) + dir
+  if (i < 0 || i >= views.length) return null
+  const mode = views[i]
   return {state: viewState(mode), label: viewLabel(mode), apply: () => { viewMode = mode; renderViews() }}
 }
 function chooseMine(mat) { myMat = mat; ctrl.setSelected(mat); if (room.code) room.setMaterial(mat) }
 
 const line = $('swipeLine'), slabel = $('swipeLabel')
-let g = null, anim = false
+let g = null
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
-gl.addEventListener('pointerdown', (e) => {
+function down(e) {
   if (anim) return
-  g = {x0: e.clientX, y0: e.clientY, active: false, hist: [[e.clientX, performance.now()]]}
-})
-gl.addEventListener('pointermove', (e) => {
+  g = {x0: e.clientX, y0: e.clientY, active: false, hist: [[e.clientX, e.clientY, performance.now()]], el: e.currentTarget}
+}
+function move(e) {
   if (!g) return
   const dx = e.clientX - g.x0, dy = e.clientY - g.y0
-  g.hist.push([e.clientX, performance.now()]); if (g.hist.length > 6) g.hist.shift()
+  g.hist.push([e.clientX, e.clientY, performance.now()]); if (g.hist.length > 6) g.hist.shift()
   if (!g.active) {
-    if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.2) return
-    const dir = dx < 0 ? 1 : -1, target = swipeTarget(dir)
-    if (!target || !ctrl.tracking) { g = null; return }
-    g.active = true; g.dir = dir; g.target = target
-    ctrl.scrubStart(target.state, dir === 1 ? 'right' : 'left')
-    slabel.textContent = target.label; slabel.classList.add('on')
-    line.hidden = false
-    try { gl.setPointerCapture(e.pointerId) } catch (err) { /* not supported */ }
+    if (rateMode) {
+      if (Math.abs(dy) >= 14 && Math.abs(dy) > Math.abs(dx) * 1.1) {
+        g.active = true; g.kind = 'vote'
+      } else if (Math.abs(dx) >= 24 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        browse(dx < 0 ? 1 : -1); g = null; return
+      } else return
+      try { g.el.setPointerCapture(e.pointerId) } catch (err) { /* not supported */ }
+    } else {
+      if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.2) return
+      const dir = dx < 0 ? 1 : -1, target = swipeTarget(dir)
+      if (!target || !ctrl.tracking) { g = null; return }
+      g.active = true; g.kind = 'layer'; g.dir = dir; g.target = target
+      ctrl.scrubStart(target.state, dir === 1 ? 'right' : 'left')
+      slabel.textContent = target.label; slabel.classList.add('on')
+      line.hidden = false
+      try { g.el.setPointerCapture(e.pointerId) } catch (err) { /* not supported */ }
+    }
   }
+  if (g.kind === 'vote') { g.dy = dy; cardTo(dy, dx * 0.3, false); return }
   const w = innerWidth
   g.x = g.dir === 1 ? clamp(w + dx, 0, w) : clamp(dx, 0, w)
   ctrl.scrubSet(g.x)
   line.style.transform = `translateX(${g.x}px)`
-})
+}
 function endSwipe() {
   if (!g) return
   const s0 = g; g = null
   if (!s0.active) return
+  const [x1, y1, t1] = s0.hist[0], [x2, y2, t2] = s0.hist[s0.hist.length - 1]
+  if (s0.kind === 'vote') {
+    const vy = (y2 - y1) / Math.max(1, t2 - t1)                    // px per ms, negative = moving up
+    const thr = Math.min(130, innerHeight * 0.16)
+    if (s0.dy < -thr || (vy < -0.6 && s0.dy < -30)) vote(1)
+    else if (s0.dy > thr || (vy > 0.6 && s0.dy > 30)) vote(-1)
+    else cardTo(0, 0, true)
+    return
+  }
   const w = innerWidth
-  const [x1, t1] = s0.hist[0], [x2, t2] = s0.hist[s0.hist.length - 1]
   const v = (x2 - x1) / Math.max(1, t2 - t1)                      // px per ms, negative = moving left
   const progress = s0.dir === 1 ? (w - s0.x) / w : s0.x / w
   const commit = progress > 0.33 || v * -s0.dir > 0.5
@@ -452,8 +607,14 @@ function endSwipe() {
   }
   requestAnimationFrame(step)
 }
-gl.addEventListener('pointerup', endSwipe)
-gl.addEventListener('pointercancel', endSwipe)
+for (const el of [gl, $('rateCard')]) {
+  el.addEventListener('pointerdown', down)
+  el.addEventListener('pointermove', move)
+  el.addEventListener('pointerup', endSwipe)
+  el.addEventListener('pointercancel', endSwipe)
+}
+window.__app = {get viewMode() { return viewMode }, set viewMode(v) { viewMode = v; refreshDisplay(true); renderViews() },
+  viewState, availableViews, tally, voteShares, setRateMode, vote, get rateIdx() { return rateIdx }, get rateMode() { return rateMode }, describe}
 
 renderRoomInfo()
 setTimeout(() => ctrl.prewarm(), 1500)

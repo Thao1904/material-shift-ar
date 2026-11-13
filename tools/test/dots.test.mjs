@@ -3,7 +3,7 @@ import sharp from 'sharp'
 import path from 'path'
 import {fileURLToPath} from 'url'
 import {trackFrame, makeModels, intrinsics, findRedBlobs} from '../../src/block/dots-core.js'
-import {DEFAULT_BLOCK} from '../../src/block/config.js'
+import {DEFAULT_BLOCK} from './legacy-cfg.mjs'
 
 // project the 12 edges of the block (W x T x D) with the solved pose
 function boxLines(r, K) {

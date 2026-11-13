@@ -201,7 +201,12 @@ Dùng chính khối gỗ sơn trắng của bạn, không cần in marker. Mở 
 4. Vì mặt khối đối xứng, có nhiều đáp án hợp lệ. Code chọn đáp án gần với khung hình trước nhất để khối không bị giật.
 5. Suy ra tâm khối: lùi vào trong một nửa độ dày (nếu thấy mặt lớn) hoặc một nửa chiều sâu (nếu thấy mặt cạnh).
 
-Hai ảnh thật của khối nằm trong `tools/test/photos/`. Chạy `node tools/test/dots.test.mjs` để kiểm tra: ảnh mặt trên phải ra `top`, ảnh mặt bên phải ra `side`.
+**Bố cục chấm hiện tại** (bản tô lại, chấm đỏ đậm):
+
+- **Mặt lớn** (2 mặt 8 × 8): 4 chấm gần 4 góc, tâm chấm cách mép khoảng **0,65 cm**.
+- **Mặt cạnh** (4 mặt 8 × 2): 2 chấm, nằm giữa bề dày, mỗi chấm cách đầu mặt khoảng **0,6 cm**.
+
+App khoá vị trí bằng 4 chấm của một mặt lớn, rồi dùng thêm các chấm trên mặt cạnh để tinh chỉnh. Nếu chỉ thấy một mặt cạnh (2 chấm) thì chưa đủ để tính vị trí, nên hãy nghiêng cho thấy cả mặt lớn. Các số trên được đo từ ảnh thật trong `tools/test/photos/v3/` (sai số chiếu trung bình khoảng 1 px). `node tools/test/blocknew.test.mjs` kiểm tra lại trên các ảnh đó. Ảnh của bố cục cũ (4 chấm mỗi mặt cạnh) vẫn có test riêng.
 
 **Đo khối và nhập vào app.** Kích thước mặc định là 8 × 8 × 2 cm. Bấm **Calibrate** để nhập số đo bằng thước kẻ. Số đo được lưu trên điện thoại đó. Muốn đổi mặc định cho mọi người, sửa `src/block/config.js`.
 
@@ -209,7 +214,7 @@ Hai ảnh thật của khối nằm trong `tools/test/photos/`. Chạy `node too
 |---|---|
 | Width / Depth / Thickness | 3 cạnh của khối |
 | Big face: dot to edge | từ tâm chấm đỏ đến mép gần nhất, trên mặt lớn |
-| Side face: dot to short / long edge | trên mặt cạnh: từ tâm chấm đến mép ngắn (đứng) và mép dài (ngang) |
+| Side face: dot to the end | trên mặt cạnh: từ tâm chấm đến đầu mặt (2 chấm, nằm giữa bề dày) |
 | Camera FOV | góc nhìn camera. Nếu vật liệu trông **to hơn** khối thật thì tăng, **nhỏ hơn** thì giảm |
 
 **Để nhận diện tốt hơn:**
@@ -223,36 +228,50 @@ Hai ảnh thật của khối nằm trong `tools/test/photos/`. Chạy `node too
 
 ## 9. Hai người cùng xem một khối
 
-Hai điện thoại cùng nhìn **một khối**, mỗi người từ góc của mình. Mỗi người tự chọn vật liệu, rồi chọn cách xem:
+Nhiều điện thoại cùng nhìn **một khối**, mỗi người từ góc của mình. Mỗi người tự chọn vật liệu, rồi chọn cách xem:
 
-| Chế độ | Khối hiển thị |
+| Lớp | Khối hiển thị |
 |---|---|
-| **Mine** | vật liệu của tôi |
-| **Phone XX · …** | vật liệu người kia đang chọn, cập nhật realtime |
-| **Mix** | **lớp chung**: hai vật liệu trộn thành từng mảng. Thanh trượt chỉnh tỉ lệ, và cả hai máy dùng chung tỉ lệ đó |
+| **Mine** | vật liệu của tôi (lớp riêng) |
+| **Phone XX · …** | lớp riêng của từng người khác, cập nhật realtime |
+| **Mix** | **lớp chung**: vật liệu của mọi người trộn thành từng mảng. Phòng 2 người có thanh trượt tỉ lệ dùng chung. Phòng 3 người trở lên chia đều |
+| **Votes** | **lớp bình chọn**: vật liệu càng nhiều like thì càng chiếm nhiều diện tích khối, kèm bảng xếp hạng |
 
-Ngoài ra, mỗi máy còn thấy **chiếc điện thoại của người kia** hiện đúng chỗ người đó đang đứng (khung màu kèm tên và vật liệu). Đây là cách nhanh nhất để kiểm tra hai hệ toạ độ đã khớp.
+### Bình chọn kiểu app hẹn hò
 
-### Bước 1: Thêm chấm đen đánh dấu gốc
+Bấm **Rate** (có khi đã vào phòng). Từng vật liệu hiện ra thành một thẻ, và khối đổi sang vật liệu đó để bạn ngắm trên khối thật.
 
-Mặt khối hình vuông với 4 chấm đỏ giống nhau, nên mỗi máy không biết góc nào là "góc 0". Nếu không đánh dấu, hai máy có thể xoay khối lệch nhau 90°, và lớp Mix sẽ không trùng nhau. Cách làm:
+- **Vuốt lên** (hoặc nút ♥) = **thích**. Thẻ bay lên kèm dấu LIKE.
+- **Vuốt xuống** (hoặc nút ✕) = **không thích**. Thẻ bay xuống kèm dấu NOPE.
+- Kéo ngắn rồi thả thì thẻ trở về chỗ cũ, không tính phiếu. **Vuốt ngang** để xem vật liệu trước hoặc sau mà không bỏ phiếu.
+- Chấm xong vật liệu cuối, app tự chuyển sang lớp **Votes**.
+
+Cách tính lớp Votes: điểm = số like − 0,5 × số nope (không âm). Tỉ lệ diện tích trên khối = điểm / tổng điểm. Ví dụ Wood có 3 like và Marble có 1 like thì khối là 75 % gỗ, 25 % đá. Phiếu của mỗi người được gửi cùng thông tin người đó (`user/<id>`), nên người vào sau vẫn thấy. Muốn đổi phiếu thì bấm Rate và vuốt lại.
+
+### Hoa văn chung khớp nhau mà không cần chấm đen
+
+Khối này trông y hệt sau khi xoay 90° hoặc lật mặt (8 tư thế), nên mỗi máy có thể chọn một tư thế khác nhau. Hoa văn Mix và Votes được làm **đối xứng theo đúng 8 tư thế đó**. Vì vậy dù máy chọn tư thế nào, mảng gỗ vẫn nằm đúng một chỗ trên khối thật với mọi người. Hoa văn được tính bằng JavaScript (`src/mix-noise.js`) thành một texture 3D. Mọi máy ra cùng một con số, không phụ thuộc GPU. Texture cũng được chuẩn hoá để "30 %" đúng là 30 % diện tích bề mặt.
+
+### (Tuỳ chọn) Chấm đen đánh dấu gốc
+
+Chấm đen chỉ cần cho một việc: hiện **chiếc điện thoại của người kia** đúng chỗ người đó đang đứng. Mix và Votes không cần chấm đen. Cách làm:
 
 - Trên **mặt trên** của khối, chọn **một** chấm đỏ bất kỳ.
 - Vẽ một **chấm đen tròn, đường kính khoảng 5 mm**, cách chấm đỏ đó **0,8 cm về phía tâm theo cả hai cạnh** (tức lệch chéo khoảng 1,1 cm).
 - Để khối **nằm yên trên bàn, mặt có chấm đen hướng lên**.
 
-App chỉ tin hướng của khối sau khi đã thấy chấm đen (trạng thái hiện *aligned*). Nếu bạn vẽ lệch so với 0,8 cm, chỉnh **Black mark: offset** trong Calibrate.
+Khung điện thoại chỉ hiện sau khi máy đã thấy chấm đen. Nếu bạn vẽ lệch so với 0,8 cm, chỉnh **Black mark: offset** trong Calibrate.
 
 ### Bước 2: Vào chung phòng
 
 1. Máy A: bấm **Room → Create room**. App hiện mã 4 ký tự và một link.
 2. Máy B: mở link đó, hoặc vào **Room** và gõ mã rồi bấm **Join**.
-3. Cả hai hướng camera vào khối cho tới khi thấy *aligned*.
-4. Mỗi người bấm chọn vật liệu, rồi dùng thanh **Mine / Phone XX / Mix** phía trên.
+3. Mọi người hướng camera vào khối.
+4. Mỗi người bấm chọn vật liệu, rồi vuốt ngang hoặc bấm thanh **Mine / Mix / Phone XX / Votes**.
 
 ### Vuốt để chuyển lớp
 
-Thứ tự lớp là **Mine ← Mix → người kia**, lớp chung nằm giữa hai người.
+Thứ tự lớp là **Mine → Mix → từng người khác → Votes**.
 
 - **Kéo ngang màn hình:** một đường sáng chạy theo ngón tay. Ở một bên đường, khối vẫn là lớp hiện tại. Ở bên kia, khối đã hiện lớp tiếp theo, kèm tên lớp ở phía trên.
 - **Thả tay quá 1/3 màn hình, hoặc vuốt nhanh,** thì chuyển lớp. Thả sớm hơn thì lớp trượt về chỗ cũ.
@@ -264,8 +283,8 @@ Thứ tự lớp là **Mine ← Mix → người kia**, lớp chung nằm giữa
 
 ### Cách hoạt động
 
-- **Mốc chung là chính khối gỗ.** Mỗi máy tự tính vị trí của khối so với camera của nó. Mọi thứ chia sẻ (hoa văn Mix, vị trí điện thoại) đều tính theo toạ độ của khối: đơn vị cm, gốc ở tâm khối, các trục cố định nhờ chấm đen. Vì vậy dù đứng ở góc nào, hai người cũng thấy cùng một chỗ trên khối thật.
-- **Hoa văn Mix** được tính bằng nhiễu 3D theo toạ độ khối (shader trong `src/material-shift.js`). Cả hai máy xếp hai vật liệu theo cùng một thứ tự, nên cùng một mảng sẽ là gỗ trên cả hai máy.
+- **Mốc chung là chính khối gỗ.** Mỗi máy tự tính vị trí của khối so với camera của nó. Mọi thứ chia sẻ đều tính theo toạ độ của khối: đơn vị cm, gốc ở tâm khối. Vì vậy dù đứng ở góc nào, mọi người cũng thấy cùng một chỗ trên khối thật.
+- **Lớp Mix/Votes** gồm vật liệu nền cộng tối đa 3 "dải" của texture 3D (`setBands` trong `src/material-shift.js`). Mọi máy xếp vật liệu theo thứ tự số hiệu, nên cùng một mảng sẽ là cùng vật liệu trên mọi máy.
 - **Đồng bộ** qua MQTT trên WebSocket (`src/block/room.js`):
   - `user/<id>`: tên và vật liệu của từng người, được giữ lại cho người vào sau.
   - `pose/<id>`: vị trí camera theo toạ độ khối, gửi 5 lần mỗi giây.
@@ -285,14 +304,20 @@ Thứ tự lớp là **Mine ← Mix → người kia**, lớp chung nằm giữa
 
 - Sai lệch thường **dưới 1 cm** ở trên khối, và tăng dần khi đi ra xa khối.
 - Hai máy phải nhập **cùng số đo khối**, và mỗi máy nên chỉnh **Camera FOV** cho đúng với camera của mình.
-- Nếu khối bị che hoặc mất khỏi khung hình quá 1,5 giây, máy cần thấy lại chấm đen thì mới *aligned* trở lại.
+- Vân gỗ của vật liệu nền có thể lệch hướng 90° giữa hai máy (chỉ hoa văn trộn là đối xứng). Muốn vân gỗ cũng trùng thì dùng chấm đen.
 
-**Test:** `npm test` kiểm tra phép tính vị trí, nhận diện trên ảnh thật, và chấm đen ở 4 góc xoay. Bài test hai máy (hai trình duyệt có camera giả cùng một broker nội bộ) xác nhận các điểm sau:
-- cả hai máy đều aligned,
-- máy A thấy vật liệu B chọn,
-- lớp Mix giống nhau trên cả hai máy,
-- thanh trượt đồng bộ,
-- hai máy trao đổi được vị trí camera.
+**Test:** `npm test` kiểm tra:
+- phép tính vị trí,
+- nhận diện trên ảnh thật (cả bố cục cũ lẫn mới),
+- chấm đen,
+- hoa văn trộn đối xứng và đều diện tích (`mixfield.test.mjs`).
+
+Bài test ba máy (ba trình duyệt có camera giả từ ảnh thật, cùng một broker nội bộ) xác nhận các điểm sau:
+- cả ba máy nhận ra khối,
+- mỗi người có lớp riêng,
+- lớp Mix giống nhau trên cả ba máy,
+- vuốt lên = like, vuốt xuống = nope, kéo ngắn thì không tính,
+- lớp Votes và bảng xếp hạng giống nhau trên mọi máy, và vật liệu nhiều like nhất chiếm nhiều diện tích nhất.
 
 ---
 
